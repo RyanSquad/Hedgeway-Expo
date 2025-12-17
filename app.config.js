@@ -4,7 +4,7 @@ export default {
     slug: 'hedgeway-expo',
     version: '1.0.0',
     orientation: 'portrait',
-    icon: './assets/icon.png',
+    // icon: './assets/icon.png', // Optional - will use default if not provided
     userInterfaceStyle: 'light',
     splash: {
       image: './assets/splash.png',
@@ -15,6 +15,9 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.hedgeway.expo',
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false
+      },
     },
     android: {
       adaptiveIcon: {
@@ -24,7 +27,7 @@ export default {
       package: 'com.hedgeway.expo',
     },
     web: {
-      favicon: './assets/favicon.png',
+      // favicon: './assets/favicon.png', // Optional - will use default if not provided
     },
     scheme: 'hedgeway',
     plugins: [
@@ -32,7 +35,7 @@ export default {
       [
         'expo-notifications',
         {
-          icon: './assets/notification-icon.png',
+          // icon: './assets/notification-icon.png', // Optional - will use default if not provided
           color: '#ffffff',
           sounds: [],
         },
@@ -44,6 +47,9 @@ export default {
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL || '',
       supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
       apiUrl: process.env.EXPO_PUBLIC_API_URL || '',
+      eas: {
+        projectId: "b4e2019c-e69e-4e1c-8533-06f2aabd8fb8"
+      },
     },
   },
 };
