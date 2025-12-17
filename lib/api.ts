@@ -111,6 +111,27 @@ export async function apiRequest<T>(
         };
       }
       
+      // Handle validation errors (400) - may have detailed error messages
+      if (response.status === 400) {
+        let errorMsg = data.message || data.error;
+        
+        // Check if there are validation errors in a different format
+        if (data.errors && typeof data.errors === 'object') {
+          const errorDetails = Object.entries(data.errors)
+            .map(([field, messages]) => {
+              const msgArray = Array.isArray(messages) ? messages : [messages];
+              return `${field}: ${msgArray.join(', ')}`;
+            })
+            .join('; ');
+          errorMsg = errorDetails || errorMsg;
+        }
+        
+        return {
+          error: errorMsg || `Invalid request: ${response.statusText}`,
+          data: undefined,
+        };
+      }
+      
       return {
         error: data.message || data.error || `Server error: ${response.status} ${response.statusText}`,
         data: undefined,
