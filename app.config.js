@@ -44,8 +44,6 @@ export default {
     extra: {
       // Add your environment variables here
       // These can be accessed via Constants.expoConfig?.extra
-      supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL || '',
-      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
       apiUrl: process.env.EXPO_PUBLIC_API_URL || '',
       eas: {
         projectId: "b4e2019c-e69e-4e1c-8533-06f2aabd8fb8"

@@ -1,11 +1,14 @@
 import Constants from 'expo-constants';
-import { getSession } from './auth';
+import * as SecureStore from 'expo-secure-store';
 
 // Base API URL - configure in app.json or environment variables
 const API_BASE_URL = 
   Constants.expoConfig?.extra?.apiUrl || 
   process.env.EXPO_PUBLIC_API_URL || 
   'https://api.example.com';
+
+// Token storage key
+const AUTH_TOKEN_KEY = 'auth_token';
 
 export interface ApiResponse<T> {
   data?: T;
@@ -20,6 +23,40 @@ export interface ApiError {
 }
 
 /**
+ * Get stored auth token
+ */
+export async function getAuthToken(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+  } catch (error) {
+    console.error('Error getting auth token:', error);
+    return null;
+  }
+}
+
+/**
+ * Set auth token
+ */
+export async function setAuthToken(token: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+  } catch (error) {
+    console.error('Error setting auth token:', error);
+  }
+}
+
+/**
+ * Clear auth token
+ */
+export async function clearAuthToken(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+  } catch (error) {
+    console.error('Error clearing auth token:', error);
+  }
+}
+
+/**
  * Make an authenticated API request
  */
 export async function apiRequest<T>(
@@ -27,9 +64,8 @@ export async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
-    // Get current session for auth token
-    const { data: sessionData } = await getSession();
-    const token = sessionData?.session?.access_token;
+    // Get stored auth token
+    const token = await getAuthToken();
 
     const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
