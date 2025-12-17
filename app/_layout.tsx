@@ -8,6 +8,7 @@ export default function RootLayout() {
     <TamaguiProvider config={config} defaultTheme="light">
       <Stack>
         <Stack.Screen name="index" options={{ title: 'Home' }} />
+        <Stack.Screen name="scan" options={{ title: 'Scan Results' }} />
       </Stack>
     </TamaguiProvider>
   );

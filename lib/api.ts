@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 const API_BASE_URL = 
   Constants.expoConfig?.extra?.apiUrl || 
   process.env.EXPO_PUBLIC_API_URL || 
-  'https://api.example.com';
+  'https://hedgeway-server-production.up.railway.app';
 
 // Token storage key
 const AUTH_TOKEN_KEY = 'auth_token';
@@ -78,17 +78,55 @@ export async function apiRequest<T>(
       },
     });
 
-    const data = await response.json();
+    let data;
+    const contentType = response.headers.get('content-type');
+    
+    try {
+      const text = await response.text();
+      if (contentType && contentType.includes('application/json')) {
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch {
+          data = { error: text || 'Invalid JSON response' };
+        }
+      } else {
+        data = text ? { error: text } : { error: 'Invalid response format' };
+      }
+    } catch (parseError) {
+      return {
+        error: 'Failed to read response from server',
+        data: undefined,
+      };
+    }
 
     if (!response.ok) {
+      // Handle authentication errors with helpful messages
+      if (response.status === 401) {
+        const errorMsg = data.message || data.error || 'Authentication required';
+        return {
+          error: errorMsg.includes('JWT') || errorMsg.includes('authentication')
+            ? 'Authentication required. Please log in to access scan results.'
+            : errorMsg,
+          data: undefined,
+        };
+      }
+      
       return {
-        error: data.message || data.error || 'An error occurred',
+        error: data.message || data.error || `Server error: ${response.status} ${response.statusText}`,
         data: undefined,
       };
     }
 
     return { data, error: undefined };
   } catch (error) {
+    // Provide more helpful error messages
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      return {
+        error: `Network error: Unable to reach server at ${API_BASE_URL}. Please check your internet connection and API URL configuration.`,
+        data: undefined,
+      };
+    }
+    
     return {
       error: error instanceof Error ? error.message : 'Network error occurred',
       data: undefined,
