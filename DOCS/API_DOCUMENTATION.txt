@@ -1,0 +1,518 @@
+================================================================================
+                    HEDGEWAY SERVER API DOCUMENTATION
+                    Developer Reference Guide
+================================================================================
+
+BASE URL
+--------
+Production: https://hedgeway-server-production.up.railway.app
+Development: http://localhost:3002
+(Development port configurable via PORT environment variable)
+
+AUTHENTICATION
+--------------
+BallDontLie API endpoints require an API key configured via BALLDONTLIE_API_KEY 
+environment variable. The API key is automatically added to requests as an 
+Authorization header.
+
+Discord endpoints require DISCORD_TOKEN and DISCORD_CHANNEL_ID environment 
+variables to be configured.
+
+CORS
+----
+All endpoints support CORS with the following headers:
+- Access-Control-Allow-Origin: *
+- Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+- Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept
+
+
+================================================================================
+ROOT & UTILITY ENDPOINTS
+================================================================================
+
+GET /
+-----
+Returns a welcome message.
+
+Response:
+{
+  "message": "Welcome to Hedgeway API"
+}
+
+Status Codes:
+- 200: Success
+
+
+GET /health
+-----------
+Health check endpoint that returns server status and uptime.
+
+Response:
+{
+  "status": "ok",
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "uptime": 3600.5
+}
+
+Fields:
+- status: Always "ok" when server is running
+- timestamp: Current server time in ISO 8601 format
+- uptime: Server uptime in seconds
+
+Status Codes:
+- 200: Server is healthy
+
+
+================================================================================
+BALLDONTLIE API PROXY ENDPOINTS
+================================================================================
+
+GET /api/bdl/:version/*
+------------------------
+Proxies requests to the BallDontLie API. This endpoint forwards requests to 
+https://api.balldontlie.io and includes the API key automatically.
+
+Path Parameters:
+- version: API version (v1 or v2)
+- *: Rest of the path to forward to BallDontLie API
+
+Query Parameters:
+- All query parameters are forwarded as-is to the upstream API
+- Array parameters like dates[] are preserved
+
+Example Requests:
+  GET /api/bdl/v1/games?dates[]=2024-01-15&per_page=100
+  GET /api/bdl/v2/odds/player_props?game_id=123&vendors[]=fanduel&vendors[]=draftkings
+  GET /api/bdl/v1/players/237
+
+Response:
+- Content-Type: application/json (default) or as returned by upstream API
+- Status: Same as upstream API response
+- Body: Raw response from BallDontLie API
+
+Status Codes:
+- 200-299: Successful response from upstream API
+- 500: Server error (check error message)
+
+
+================================================================================
+SCAN ENDPOINTS
+================================================================================
+
+GET /api/scan/results
+---------------------
+Retrieves the latest scan results. Returns empty structure if no scan has been 
+run yet.
+
+Response:
+{
+  "arbs": [
+    {
+      "edge": 0.0250,
+      "gameId": 12345,
+      "playerId": 237,
+      "propType": "points",
+      "lineValue": 25.5,
+      "marketType": "over_under",
+      "over": {
+        "odds": -110,
+        "vendor": "fanduel"
+      },
+      "under": {
+        "odds": -105,
+        "vendor": "draftkings"
+      },
+      "timestamp": 1705319400000
+    }
+  ],
+  "gameMap": {
+    "12345": "LAL at BOS"
+  },
+  "playerNameMap": {
+    "237": "LeBron James"
+  },
+  "gameTimeMap": {
+    "12345": "2024-01-15T20:00:00Z"
+  },
+  "gameStatusMap": {
+    "12345": "1st Qtr"
+  },
+  "date": "2024-01-15",
+  "timestamp": 1705319400000,
+  "nextRefreshSeconds": 60
+}
+
+Fields:
+- arbs: Array of arbitrage opportunities sorted by edge (descending)
+  - edge: Calculated edge/profit margin (0.0250 = 2.5%)
+  - gameId: NBA game identifier
+  - playerId: Player identifier
+  - propType: Type of prop (e.g., "points", "assists", "rebounds")
+  - lineValue: The line value for the prop
+  - marketType: Always "over_under" for current implementation
+  - over: Best over odds from a vendor
+    - odds: American odds (e.g., -110, +150)
+    - vendor: Sportsbook name
+  - under: Best under odds from a different vendor
+    - odds: American odds
+    - vendor: Sportsbook name
+  - timestamp: Unix timestamp in milliseconds when arb was found
+- gameMap: Object mapping game IDs to formatted game labels (e.g., "LAL at BOS")
+- playerNameMap: Object mapping player IDs to full player names
+- gameTimeMap: Object mapping game IDs to game start times (ISO 8601 format)
+- gameStatusMap: Object mapping game IDs to game status strings
+- date: Date string (YYYY-MM-DD) in America/New_York timezone for the scan
+- timestamp: Unix timestamp in milliseconds of when the scan completed
+- nextRefreshSeconds: Seconds until the next automatic scan
+
+If no results available, returns:
+{
+  "arbs": [],
+  "gameMap": {},
+  "playerNameMap": {},
+  "gameTimeMap": {},
+  "gameStatusMap": {},
+  "date": null,
+  "timestamp": null,
+  "nextRefreshSeconds": 60
+}
+
+Status Codes:
+- 200: Success
+- 500: Server error
+
+
+POST /api/scan/run
+------------------
+Manually triggers a new scan. The scan will fetch today's and tomorrow's games 
+(in America/New_York timezone) and look for arbitrage opportunities across 
+configured sportsbooks.
+
+Request Body:
+  (Empty body accepted)
+
+Response:
+  Same structure as GET /api/scan/results
+
+Notes:
+- Scans may take 30-60 seconds to complete depending on number of games
+- Prevents overlapping scans (subsequent requests while a scan is running are 
+  ignored)
+- Automatically sends results to Discord if configured and results are found
+
+Status Codes:
+- 200: Scan completed successfully
+- 500: Server error during scan
+
+
+GET /api/scan/config
+--------------------
+Retrieves the current scan configuration.
+
+Response:
+{
+  "date": null,
+  "books": [
+    "betmgm",
+    "bet365",
+    "ballybet",
+    "betparx",
+    "betrivers",
+    "caesars",
+    "draftkings",
+    "fanduel",
+    "rebet"
+  ],
+  "propTypes": null,
+  "minEdge": 0.0020,
+  "maxAge": undefined,
+  "autoRefreshSeconds": 60
+}
+
+Fields:
+- date: Date filter (null = use today/tomorrow automatically)
+- books: Array of sportsbook vendor names to scan
+- propTypes: Array of prop types to filter (null = all prop types)
+- minEdge: Minimum edge required to include an arb (0.0020 = 0.2%)
+- maxAge: Maximum age filter (currently unused)
+- autoRefreshSeconds: Seconds between automatic scans (currently fixed at 60)
+
+Status Codes:
+- 200: Success
+- 500: Server error
+
+
+POST /api/scan/config
+---------------------
+Updates the scan configuration. Only provided fields are updated; other fields 
+remain unchanged.
+
+Request Body:
+{
+  "books": ["fanduel", "draftkings", "betmgm"],
+  "propTypes": ["points", "assists"],
+  "minEdge": 0.0030
+}
+
+All fields are optional. Partial updates are supported.
+
+Response:
+{
+  "success": true,
+  "config": {
+    "date": null,
+    "books": ["fanduel", "draftkings", "betmgm"],
+    "propTypes": ["points", "assists"],
+    "minEdge": 0.0030,
+    "maxAge": undefined,
+    "autoRefreshSeconds": 60
+  }
+}
+
+Available Sportsbooks:
+- betmgm
+- bet365
+- ballybet
+- betparx
+- betrivers
+- caesars
+- draftkings
+- fanduel
+- rebet
+
+Common Prop Types:
+- points
+- assists
+- rebounds
+- steals
+- blocks
+- turnovers
+- threes
+- (others as supported by BallDontLie API)
+
+Status Codes:
+- 200: Configuration updated successfully
+- 500: Server error
+
+
+POST /api/scan/start
+--------------------
+Starts automatic scanning. Scans will run every 60 seconds (aligned to the 
+next whole minute).
+
+Request Body:
+  (Empty body accepted)
+
+Response:
+{
+  "success": true,
+  "message": "Auto-refresh started"
+}
+
+Notes:
+- Auto-refresh starts automatically when the server starts
+- Scans are aligned to run at the start of each minute
+- Each scan checks for games today and tomorrow (America/New_York timezone)
+
+Status Codes:
+- 200: Auto-refresh started
+- 500: Server error
+
+
+POST /api/scan/stop
+-------------------
+Stops automatic scanning.
+
+Request Body:
+  (Empty body accepted)
+
+Response:
+{
+  "success": true,
+  "message": "Auto-refresh stopped"
+}
+
+Status Codes:
+- 200: Auto-refresh stopped
+- 500: Server error
+
+
+================================================================================
+DISCORD ENDPOINTS
+================================================================================
+
+POST /api/discord/send-results
+-------------------------------
+Sends scan results to a configured Discord channel. The results are formatted 
+as a Discord message with arbitrage opportunities.
+
+Request Body:
+{
+  "results": [
+    {
+      "playerId": 237,
+      "prop": "points",
+      "line": 25.5,
+      "overVendor": "fanduel",
+      "overOdds": -110,
+      "underVendor": "draftkings",
+      "underOdds": -105,
+      "gameId": 12345,
+      "edge": 0.0250
+    }
+  ],
+  "scanInfo": {
+    "gameMap": {
+      "12345": "LAL at BOS"
+    },
+    "playerNameMap": {
+      "237": "LeBron James"
+    },
+    "date": "2024-01-15"
+  }
+}
+
+Fields:
+- results: Array of arbitrage opportunities
+  - playerId: Player identifier (number)
+  - prop: Prop type string (e.g., "points", "assists")
+  - line: Line value (number)
+  - overVendor: Sportsbook offering best over odds (string)
+  - overOdds: American odds for over (number)
+  - underVendor: Sportsbook offering best under odds (string)
+  - underOdds: American odds for under (number)
+  - gameId: Game identifier (number)
+  - edge: Calculated edge (number, optional)
+- scanInfo: Optional metadata object
+  - gameMap: Object mapping game IDs to game labels
+  - playerNameMap: Object mapping player IDs to player names
+  - date: Date string (YYYY-MM-DD)
+
+Response:
+{
+  "success": true,
+  "message": "Results sent to Discord"
+}
+
+If no results provided (empty array):
+{
+  "success": true,
+  "message": "No results to send"
+}
+
+Status Codes:
+- 200: Success (results sent or no results to send)
+- 400: Invalid request body (results must be an array)
+- 503: Discord bot not configured or not ready
+- 500: Server error or failed to send to Discord
+
+Notes:
+- Discord must be configured via DISCORD_TOKEN and DISCORD_CHANNEL_ID 
+  environment variables
+- Only the top 20 results are displayed in the Discord message
+- Messages are automatically split if they exceed Discord's 2000 character limit
+- Results are formatted with bet amounts calculated for a $100 total stake
+
+
+================================================================================
+ERROR RESPONSES
+================================================================================
+
+All endpoints may return error responses in the following format:
+
+{
+  "error": "Error message description"
+}
+
+Common Status Codes:
+- 400: Bad Request - Invalid request parameters or body
+- 404: Not Found - Route not found
+- 500: Internal Server Error - Server-side error
+- 503: Service Unavailable - Service not ready (e.g., Discord not configured)
+
+The error handler middleware returns:
+{
+  "error": "Error message or 'Something went wrong!'"
+}
+
+
+================================================================================
+ENVIRONMENT VARIABLES
+================================================================================
+
+Required:
+- BALLDONTLIE_API_KEY: API key for BallDontLie API
+
+Optional:
+- PORT: Server port (default: 3002)
+- DISCORD_TOKEN: Discord bot token for sending notifications
+- DISCORD_CHANNEL_ID: Discord channel ID for sending scan results
+
+
+================================================================================
+IMPLEMENTATION NOTES
+================================================================================
+
+Scanning Behavior:
+- Scans automatically check games for today and tomorrow (America/New_York 
+  timezone)
+- Scans look for arbitrage opportunities where the sum of implied probabilities 
+  is less than 1.0
+- Only opportunities with edge >= minEdge are included
+- Results are sorted by edge (highest first)
+- Scans include a 150ms delay between game fetches to avoid rate limiting
+
+Arbitrage Calculation:
+- Edge = 1 - (implied_prob_over + implied_prob_under)
+- Implied probability from American odds:
+  - Positive odds: 100 / (odds + 100)
+  - Negative odds: abs(odds) / (abs(odds) + 100)
+- Optimal bet amounts are calculated for equalizing profit across both sides
+
+Auto-Refresh:
+- Starts automatically when server starts
+- Scans run every 60 seconds
+- First scan is aligned to the next whole minute
+- Results are automatically sent to Discord if configured and results exist
+
+
+================================================================================
+EXAMPLE USAGE
+================================================================================
+
+Note: Replace https://hedgeway-server-production.up.railway.app with 
+http://localhost:3002 for local development.
+
+1. Check server health:
+   curl https://hedgeway-server-production.up.railway.app/health
+
+2. Get latest scan results:
+   curl https://hedgeway-server-production.up.railway.app/api/scan/results
+
+3. Run a manual scan:
+   curl -X POST https://hedgeway-server-production.up.railway.app/api/scan/run
+
+4. Update scan configuration:
+   curl -X POST https://hedgeway-server-production.up.railway.app/api/scan/config \
+     -H "Content-Type: application/json" \
+     -d '{"minEdge": 0.0030, "books": ["fanduel", "draftkings"]}'
+
+5. Get BallDontLie games for a date:
+   curl "https://hedgeway-server-production.up.railway.app/api/bdl/v1/games?dates[]=2024-01-15&per_page=100"
+
+6. Send results to Discord:
+   curl -X POST https://hedgeway-server-production.up.railway.app/api/discord/send-results \
+     -H "Content-Type: application/json" \
+     -d '{"results": [...], "scanInfo": {...}}'
+
+
+================================================================================
+VERSION INFORMATION
+================================================================================
+
+Server: Hedgeway Server v1.0.0
+Generated: 2024
+
+This documentation is generated from the codebase and may be updated as the API 
+evolves. Refer to the source code for the most up-to-date implementation details.
+
