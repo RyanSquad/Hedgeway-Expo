@@ -5,11 +5,11 @@ export default {
     version: '1.0.0',
     orientation: 'portrait',
     // icon: './assets/icon.png', // Optional - will use default if not provided
-    userInterfaceStyle: 'light',
+    userInterfaceStyle: 'dark',
     splash: {
       image: './assets/splash.png',
       resizeMode: 'contain',
-      backgroundColor: '#ffffff',
+      backgroundColor: '#000000',
     },
     assetBundlePatterns: ['**/*'],
     ios: {
@@ -22,7 +22,7 @@ export default {
     android: {
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#ffffff',
+        backgroundColor: '#000000',
       },
       package: 'com.hedgeway.expo',
     },

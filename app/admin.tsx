@@ -172,7 +172,7 @@ export default function AdminPanel() {
         <Text marginTop="$4" fontSize="$4" color="$color">
           Loading...
         </Text>
-        <StatusBar style="auto" />
+        <StatusBar style="light" />
       </YStack>
     );
   }
@@ -189,7 +189,7 @@ export default function AdminPanel() {
         <Button marginTop="$4" onPress={() => router.replace('/scan')}>
           Go to Scan Results
         </Button>
-        <StatusBar style="auto" />
+        <StatusBar style="light" />
       </YStack>
     );
   }

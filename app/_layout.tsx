@@ -5,7 +5,7 @@ import config from '../tamagui.config';
 
 export default function RootLayout() {
   return (
-    <TamaguiProvider config={config} defaultTheme="light">
+    <TamaguiProvider config={config} defaultTheme="dark">
       <Stack>
         <Stack.Screen name="index" options={{ title: 'Login', headerShown: false }} />
         <Stack.Screen name="home" options={{ title: 'Home', headerShown: false }} />

@@ -12,7 +12,7 @@ export default function LandingPage() {
           Welcome
         </Text>
       </YStack>
-      <StatusBar style="auto" />
+      <StatusBar style="light" />
     </YStack>
   );
 }

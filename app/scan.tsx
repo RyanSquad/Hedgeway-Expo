@@ -133,7 +133,7 @@ export default function ScanScreen() {
         <Text marginTop="$4" fontSize="$4" color="$color">
           Loading scan results...
         </Text>
-        <StatusBar style="auto" />
+        <StatusBar style="light" />
       </YStack>
     );
   }
@@ -147,7 +147,7 @@ export default function ScanScreen() {
         <Text fontSize="$4" color="$color" textAlign="center" marginBottom="$4">
           {error}
         </Text>
-        <StatusBar style="auto" />
+        <StatusBar style="light" />
       </YStack>
     );
   }

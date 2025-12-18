@@ -217,7 +217,7 @@ export default function HomeScreen() {
           </YStack>
         </YStack>
       </Card>
-      <StatusBar style="auto" />
+      <StatusBar style="light" />
     </YStack>
   );
 }
