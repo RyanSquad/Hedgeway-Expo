@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { get, post } from '../lib/api';
 import { useAuth } from '../lib/useAuth';
-import { MenuButton } from '../components/MenuButton';
+import { NavigationBar } from '../components/NavigationBar';
 
 interface ScanConfig {
   date: string | null;
@@ -196,12 +196,7 @@ export default function AdminPanel() {
 
   return (
     <YStack flex={1} backgroundColor="$background">
-      <XStack padding="$4" backgroundColor="$background" borderBottomWidth={1} borderBottomColor="$borderColor" alignItems="center" space="$3">
-        <MenuButton />
-        <Text fontSize="$8" fontWeight="bold" color="$color" flex={1}>
-          Admin Panel
-        </Text>
-      </XStack>
+      <NavigationBar />
 
       <ScrollView flex={1} padding="$4">
         <YStack space="$4">

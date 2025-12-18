@@ -77,8 +77,8 @@ export default function HomeScreen() {
         const stored = await setAuthToken(token);
         
         if (stored) {
-          // Navigate to scan screen after token is confirmed stored
-          router.replace('/scan');
+          // Navigate to landing page after token is confirmed stored
+          router.replace('/home');
         } else {
           setError('Failed to store authentication token. Please try again.');
           setLoading(false);
@@ -102,7 +102,7 @@ export default function HomeScreen() {
       alignItems="center" 
       justifyContent={isWeb ? "center" : "flex-start"} 
       padding="$4" 
-      paddingTop={isWeb ? "$4" : "$8"}
+      paddingTop={isWeb ? "$4" : "$20"}
     >
       <Card elevate padding="$6" width="100%" maxWidth={400} backgroundColor="$backgroundStrong">
         <YStack space="$3">

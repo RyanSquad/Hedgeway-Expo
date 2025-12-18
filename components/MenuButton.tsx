@@ -22,6 +22,7 @@ export function MenuButton() {
   };
 
   const menuItems = [
+    { label: 'Home', path: '/home', show: true },
     { label: 'Scan Results', path: '/scan', show: true },
     { label: 'Admin Panel', path: '/admin', show: isSuperAdmin },
   ].filter(item => item.show);
@@ -34,8 +35,9 @@ export function MenuButton() {
         onPress={() => setOpen(true)}
         backgroundColor="transparent"
         pressStyle={{ opacity: 0.7 }}
+        padding="$1"
       >
-        <Text fontSize="$6" color="$color">☰</Text>
+        <Text fontSize="$6" color="white">☰</Text>
       </Button>
 
       <Sheet

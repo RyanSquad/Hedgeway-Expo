@@ -3,7 +3,7 @@ import { YStack, XStack, Text, ScrollView, Spinner, Card, Separator } from 'tama
 import { StatusBar } from 'expo-status-bar';
 import { get } from '../lib/api';
 import { RefreshControl } from 'react-native';
-import { MenuButton } from '../components/MenuButton';
+import { NavigationBar } from '../components/NavigationBar';
 
 interface ArbOpportunity {
   edge: number;
@@ -157,29 +157,28 @@ export default function ScanScreen() {
 
   return (
     <YStack flex={1} backgroundColor="$background">
-      <XStack padding="$4" backgroundColor="$background" borderBottomWidth={1} borderBottomColor="$borderColor" alignItems="center" space="$3">
-        <MenuButton />
-        <YStack flex={1}>
-          <XStack justifyContent="space-between" alignItems="center" marginBottom="$2">
-            <Text fontSize="$8" fontWeight="bold" color="$color">
-              Scan Results
+      <NavigationBar />
+      
+      <YStack padding="$4" backgroundColor="$background" borderBottomWidth={1} borderBottomColor="$borderColor">
+        <XStack justifyContent="space-between" alignItems="center" marginBottom="$2">
+          <Text fontSize="$8" fontWeight="bold" color="$color">
+            Scan Results
+          </Text>
+          {results?.timestamp && (
+            <Text fontSize="$2" color="$colorPress">
+              {formatGameTime(results.timestamp)}
             </Text>
-            {results?.timestamp && (
-              <Text fontSize="$2" color="$colorPress">
-                {formatGameTime(results.timestamp)}
-              </Text>
-            )}
-          </XStack>
+          )}
+        </XStack>
         {results?.date && (
           <Text fontSize="$3" color="$colorPress">
             Date: {results.date}
           </Text>
         )}
-          <Text fontSize="$2" color="$colorPress" marginTop="$2">
-            Auto-refreshing every 60 seconds
-          </Text>
-        </YStack>
-      </XStack>
+        <Text fontSize="$2" color="$colorPress" marginTop="$2">
+          Auto-refreshing every 60 seconds
+        </Text>
+      </YStack>
 
       <ScrollView
         flex={1}
