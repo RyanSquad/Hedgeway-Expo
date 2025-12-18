@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { YStack, XStack, Text, Button, Input, Card, Spinner } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import { Platform } from 'react-native';
 import { post, setAuthToken, getAuthToken } from '../lib/api';
 
 interface LoginResponse {
@@ -92,11 +93,20 @@ export default function HomeScreen() {
     }
   };
 
+  const isWeb = Platform.OS === 'web';
+  
   return (
-    <YStack flex={1} backgroundColor="$background" alignItems="center" justifyContent="center" padding="$4">
+    <YStack 
+      flex={1} 
+      backgroundColor="$background" 
+      alignItems="center" 
+      justifyContent={isWeb ? "center" : "flex-start"} 
+      padding="$4" 
+      paddingTop={isWeb ? "$4" : "$8"}
+    >
       <Card elevate padding="$6" width="100%" maxWidth={400} backgroundColor="$backgroundStrong">
-        <YStack space="$4">
-          <YStack alignItems="center" space="$2" marginBottom="$4">
+        <YStack space="$3">
+          <YStack alignItems="center" space="$2" marginBottom="$2">
             <Text fontSize="$10" fontWeight="bold" color="$color">
               Hedgeway
             </Text>
@@ -105,7 +115,7 @@ export default function HomeScreen() {
             </Text>
           </YStack>
 
-          <XStack space="$2" marginBottom="$4" justifyContent="center">
+          <XStack space="$2" marginBottom="$2" justifyContent="center">
             <Button
               size="$3"
               theme={isLogin ? 'active' : undefined}
@@ -138,8 +148,8 @@ export default function HomeScreen() {
             </Card>
           )}
 
-          <YStack space="$3">
-            <YStack space="$2">
+          <YStack space="$2">
+            <YStack space="$1">
               <Text fontSize="$3" color="$colorPress">
                 Email
               </Text>
@@ -156,7 +166,7 @@ export default function HomeScreen() {
               />
             </YStack>
 
-            <YStack space="$2">
+            <YStack space="$1">
               <Text fontSize="$3" color="$colorPress">
                 Password
               </Text>
@@ -172,7 +182,7 @@ export default function HomeScreen() {
             </YStack>
 
             {!isLogin && (
-              <YStack space="$2">
+              <YStack space="$1">
                 <Text fontSize="$3" color="$colorPress">
                   Confirm Password
                 </Text>
@@ -193,7 +203,7 @@ export default function HomeScreen() {
               size="$4"
               onPress={handleSubmit}
               disabled={loading}
-              marginTop="$2"
+              marginTop="$1"
             >
               {loading ? (
                 <XStack alignItems="center" space="$2">
