@@ -9,6 +9,7 @@ export default function RootLayout() {
       <Stack>
         <Stack.Screen name="index" options={{ title: 'Home' }} />
         <Stack.Screen name="scan" options={{ title: 'Scan Results' }} />
+        <Stack.Screen name="admin" options={{ title: 'Admin Panel' }} />
       </Stack>
     </TamaguiProvider>
   );
