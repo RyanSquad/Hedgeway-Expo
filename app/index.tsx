@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { YStack, XStack, Text, Button, Input, Card, Spinner } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
-import { post, setAuthToken } from '../lib/api';
+import { post, setAuthToken, getAuthToken } from '../lib/api';
 
 interface LoginResponse {
   token: string;
@@ -66,13 +66,22 @@ export default function HomeScreen() {
         return;
       }
 
-      // Extract token from response - handle both login and register responses
+      // Extract token from response - according to API docs, token is directly in response.data
       const data = response.data as any;
-      const token = data.token || data.data?.token || data.user?.token;
+      // API returns: { success: true, token: "...", user: {...} }
+      const token = data?.token;
       
       if (token && typeof token === 'string') {
-        await setAuthToken(token);
-        router.replace('/scan');
+        // Store token securely before navigation
+        const stored = await setAuthToken(token);
+        
+        if (stored) {
+          // Navigate to scan screen after token is confirmed stored
+          router.replace('/scan');
+        } else {
+          setError('Failed to store authentication token. Please try again.');
+          setLoading(false);
+        }
       } else {
         setError('No token received from server. Please try again.');
         setLoading(false);

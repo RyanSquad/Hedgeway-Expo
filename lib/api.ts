@@ -1,5 +1,7 @@
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
+import { storeTokenSecurely, retrieveTokenSecurely, isTokenExpired } from './token-security';
 
 // Base API URL - configure in app.json or environment variables
 const API_BASE_URL = 
@@ -9,6 +11,9 @@ const API_BASE_URL =
 
 // Token storage key
 const AUTH_TOKEN_KEY = 'auth_token';
+
+// Check if we're on web
+const isWeb = Platform.OS === 'web';
 
 export interface ApiResponse<T> {
   data?: T;
@@ -24,10 +29,42 @@ export interface ApiError {
 
 /**
  * Get stored auth token
+ * Returns null if token is expired or not found
  */
 export async function getAuthToken(): Promise<string | null> {
   try {
-    return await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+    if (isWeb) {
+      // Use localStorage for web with obfuscation
+      if (typeof window === 'undefined') {
+        return null;
+      }
+      const obfuscated = localStorage.getItem(AUTH_TOKEN_KEY);
+      if (!obfuscated) {
+        return null;
+      }
+      const token = retrieveTokenSecurely(obfuscated, true);
+      
+      // Check if token is expired
+      if (token && isTokenExpired(token)) {
+        console.warn('Token has expired, clearing from storage');
+        await clearAuthToken();
+        return null;
+      }
+      
+      return token;
+    } else {
+      // Use SecureStore for native platforms
+      const token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+      
+      // Check if token is expired
+      if (token && isTokenExpired(token)) {
+        console.warn('Token has expired, clearing from storage');
+        await clearAuthToken();
+        return null;
+      }
+      
+      return token;
+    }
   } catch (error) {
     console.error('Error getting auth token:', error);
     return null;
@@ -36,12 +73,68 @@ export async function getAuthToken(): Promise<string | null> {
 
 /**
  * Set auth token
+ * Returns true if successful, false otherwise
  */
-export async function setAuthToken(token: string): Promise<void> {
+export async function setAuthToken(token: string): Promise<boolean> {
   try {
-    await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+    // Check if token is already expired before storing
+    if (isTokenExpired(token)) {
+      console.warn('Attempted to store an expired token');
+      return false;
+    }
+
+    if (isWeb) {
+      // Use localStorage for web with obfuscation
+      if (typeof window === 'undefined') {
+        console.error('localStorage is not available');
+        return false;
+      }
+      
+      // Obfuscate token before storing
+      const obfuscated = storeTokenSecurely(token, true);
+      localStorage.setItem(AUTH_TOKEN_KEY, obfuscated);
+      
+      // Verify it was stored correctly
+      const storedObfuscated = localStorage.getItem(AUTH_TOKEN_KEY);
+      if (!storedObfuscated) {
+        return false;
+      }
+      
+      const deobfuscated = retrieveTokenSecurely(storedObfuscated, true);
+      return deobfuscated === token;
+    } else {
+      // Use SecureStore for native platforms
+      // Check if SecureStore is available
+      let isAvailable = true;
+      try {
+        if (typeof SecureStore.isAvailableAsync === 'function') {
+          isAvailable = await SecureStore.isAvailableAsync();
+        }
+      } catch {
+        // Method might not exist, assume available
+        isAvailable = true;
+      }
+
+      if (!isAvailable) {
+        console.warn('SecureStore is not available on this platform.');
+        return false;
+      }
+
+      await SecureStore.setItemAsync(AUTH_TOKEN_KEY, token);
+      
+      // Small delay to ensure write completes (some platforms need this)
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // Verify it was stored
+      const stored = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+      return stored === token;
+    }
   } catch (error) {
     console.error('Error setting auth token:', error);
+    if (error instanceof Error) {
+      console.error('Error message:', error.message);
+    }
+    return false;
   }
 }
 
@@ -50,7 +143,15 @@ export async function setAuthToken(token: string): Promise<void> {
  */
 export async function clearAuthToken(): Promise<void> {
   try {
-    await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+    if (isWeb) {
+      // Use localStorage for web
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+      }
+    } else {
+      // Use SecureStore for native platforms
+      await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
+    }
   } catch (error) {
     console.error('Error clearing auth token:', error);
   }
@@ -69,13 +170,25 @@ export async function apiRequest<T>(
 
     const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
+    // Build headers - ensure Authorization is included if token exists
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    };
+
+    // Add Authorization header if token exists (override any existing Authorization header)
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    } else {
+      // Log if token is missing for protected endpoints (for debugging)
+      if (endpoint.includes('/api/scan') || endpoint.includes('/api/bdl') || endpoint.includes('/api/discord')) {
+        console.warn(`[API] No auth token found for protected endpoint: ${endpoint}`);
+      }
+    }
+
     const response = await fetch(url, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-        ...options.headers,
-      },
+      headers,
     });
 
     let data;
