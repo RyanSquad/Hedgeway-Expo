@@ -1,6 +1,8 @@
-import { useEffect, useState, useCallback } from 'react';
-import { YStack, XStack, Text, ScrollView, Spinner, Card, Separator, Switch, Label, Input } from 'tamagui';
+import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
+import { YStack, XStack, Text, ScrollView, Spinner, Card, Separator, Switch, Label, Input, Button } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
+import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { get } from '../lib/api';
 import { RefreshControl } from 'react-native';
 import { NavigationBar } from '../components/NavigationBar';
@@ -153,6 +155,147 @@ function formatGameTime(timestamp: number | null): string {
 const REFRESH_INTERVAL_KEY = 'hedgeway_scan_refresh_interval';
 const DEFAULT_REFRESH_INTERVAL = 60; // seconds
 
+// Cross-platform storage utility
+const isWeb = Platform.OS === 'web';
+
+async function getStoredValue(key: string): Promise<string | null> {
+  try {
+    if (isWeb) {
+      if (typeof window !== 'undefined') {
+        return localStorage.getItem(key);
+      }
+      return null;
+    } else {
+      return await SecureStore.getItemAsync(key);
+    }
+  } catch (error) {
+    console.error('Error getting stored value:', error);
+    return null;
+  }
+}
+
+async function setStoredValue(key: string, value: string): Promise<void> {
+  try {
+    if (isWeb) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(key, value);
+      }
+    } else {
+      await SecureStore.setItemAsync(key, value);
+    }
+  } catch (error) {
+    console.error('Error setting stored value:', error);
+  }
+}
+
+// Memoized component for list items to prevent unnecessary re-renders
+interface ProcessedArb extends ArbOpportunity {
+  gameLabel: string;
+  playerName: string;
+  gameTime: string | null;
+  gameStatus?: string;
+  betAmounts: { over: number; under: number };
+  profit: string;
+  edge: string;
+  propTypeDisplay: string;
+  key: string;
+}
+
+const ArbCard = memo(({ 
+  arb, 
+  useDecimalOdds, 
+  betAmountDisplay 
+}: { 
+  arb: ProcessedArb; 
+  useDecimalOdds: boolean; 
+  betAmountDisplay: string;
+}) => {
+  return (
+    <Card elevate padding="$4" backgroundColor="$backgroundStrong">
+      <YStack space="$3">
+        <XStack justifyContent="space-between" alignItems="flex-start">
+          <YStack flex={1}>
+            <Text fontSize="$6" fontWeight="bold" color="$color">
+              {arb.playerName}
+            </Text>
+            <Text fontSize="$4" color="$colorPress" marginTop="$1">
+              {arb.gameLabel}
+            </Text>
+            {arb.gameTime && (
+              <Text fontSize="$2" color="$colorPress" marginTop="$1">
+                {arb.gameTime}
+              </Text>
+            )}
+            {arb.gameStatus && (
+              <Text fontSize="$2" color="$colorPress">
+                {arb.gameStatus}
+              </Text>
+            )}
+          </YStack>
+          <YStack alignItems="flex-end">
+            <Text fontSize="$6" fontWeight="bold" color="$green10">
+              {arb.edge}
+            </Text>
+            <Text fontSize="$2" color="$colorPress">
+              Arb Edge
+            </Text>
+            <Text fontSize="$4" fontWeight="600" color="$green10" marginTop="$1">
+              {arb.profit}
+            </Text>
+            <Text fontSize="$2" color="$colorPress">
+              Profit (${betAmountDisplay} bet)
+            </Text>
+          </YStack>
+        </XStack>
+
+        <Separator marginVertical="$2" />
+
+        <YStack space="$2">
+          <XStack justifyContent="space-between" alignItems="center">
+            <Text fontSize="$4" fontWeight="600" color="$color">
+              {arb.propTypeDisplay} {arb.lineValue}
+            </Text>
+          </XStack>
+
+          <XStack justifyContent="space-between" space="$4">
+            <YStack flex={1} padding="$3" backgroundColor="$green2" borderRadius="$2">
+              <Text fontSize="$2" color="$green11" marginBottom="$1">
+                OVER
+              </Text>
+              <Text fontSize="$5" fontWeight="bold" color="$green11">
+                {formatOdds(arb.over.odds, useDecimalOdds)}
+              </Text>
+              <Text fontSize="$3" fontWeight="600" color="$green11" marginTop="$1">
+                {formatProfit(arb.betAmounts.over)}
+              </Text>
+              <Text fontSize="$2" color="$green11" marginTop="$1">
+                {arb.over.vendor}
+              </Text>
+            </YStack>
+
+            <YStack flex={1} padding="$3" backgroundColor="$red2" borderRadius="$2">
+              <Text fontSize="$2" color="$red11" marginBottom="$1">
+                UNDER
+              </Text>
+              <Text fontSize="$5" fontWeight="bold" color="$red11">
+                {formatOdds(arb.under.odds, useDecimalOdds)}
+              </Text>
+              <Text fontSize="$3" fontWeight="600" color="$red11" marginTop="$1">
+                {formatProfit(arb.betAmounts.under)}
+              </Text>
+              <Text fontSize="$2" color="$red11" marginTop="$1">
+                {arb.under.vendor}
+              </Text>
+            </YStack>
+          </XStack>
+        </YStack>
+      </YStack>
+    </Card>
+  );
+});
+
+ArbCard.displayName = 'ArbCard';
+
 export default function ScanScreen() {
   const [results, setResults] = useState<ScanResults | null>(null);
   const [loading, setLoading] = useState(true);
@@ -160,15 +303,26 @@ export default function ScanScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [useDecimalOdds, setUseDecimalOdds] = useState(false);
   const [hideInProgressGames, setHideInProgressGames] = useState(false);
-  const [betAmount, setBetAmount] = useState<string>('100');
-  const [refreshInterval, setRefreshInterval] = useState<string>(() => {
-    // Load from localStorage on mount
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(REFRESH_INTERVAL_KEY);
-      return saved || DEFAULT_REFRESH_INTERVAL.toString();
-    }
-    return DEFAULT_REFRESH_INTERVAL.toString();
-  });
+  
+  // Input values (for display only, don't trigger calculations)
+  const [betAmountInput, setBetAmountInput] = useState<string>('100');
+  const [refreshIntervalInput, setRefreshIntervalInput] = useState<string>(DEFAULT_REFRESH_INTERVAL.toString());
+  
+  // Actual values used for calculations (only updated when Save is pressed)
+  const [betAmountForCalculation, setBetAmountForCalculation] = useState<string>('100');
+  const [refreshInterval, setRefreshInterval] = useState<string>(DEFAULT_REFRESH_INTERVAL.toString());
+  
+  // Load stored refresh interval on mount
+  useEffect(() => {
+    const loadStoredInterval = async () => {
+      const saved = await getStoredValue(REFRESH_INTERVAL_KEY);
+      if (saved) {
+        setRefreshIntervalInput(saved);
+        setRefreshInterval(saved);
+      }
+    };
+    loadStoredInterval();
+  }, []);
 
   const fetchScanResults = useCallback(async (isRefreshing = false) => {
     try {
@@ -213,21 +367,94 @@ export default function ScanScreen() {
     };
   }, [fetchScanResults, refreshInterval]);
 
-  const handleRefreshIntervalChange = useCallback((value: string) => {
+  const handleRefreshIntervalInputChange = useCallback((value: string) => {
     // Only allow numbers
     const numericValue = value.replace(/[^0-9]/g, '');
     if (numericValue === '' || parseInt(numericValue, 10) > 0) {
-      setRefreshInterval(numericValue);
-      // Save to localStorage
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(REFRESH_INTERVAL_KEY, numericValue || DEFAULT_REFRESH_INTERVAL.toString());
-      }
+      setRefreshIntervalInput(numericValue);
     }
   }, []);
 
   const handleRefresh = useCallback(() => {
     fetchScanResults(true);
   }, [fetchScanResults]);
+
+  const handleBetAmountInputChange = useCallback((text: string) => {
+    // Only allow numbers and decimal point
+    const numericValue = text.replace(/[^0-9.]/g, '');
+    // Prevent multiple decimal points
+    const parts = numericValue.split('.');
+    const formatted = parts.length > 2 
+      ? parts[0] + '.' + parts.slice(1).join('')
+      : numericValue;
+    setBetAmountInput(formatted);
+  }, []);
+
+  const handleSaveSettings = useCallback(async () => {
+    // Save bet amount
+    const betValue = betAmountInput || '100';
+    setBetAmountForCalculation(betValue);
+    
+    // Save refresh interval
+    const intervalValue = refreshIntervalInput || DEFAULT_REFRESH_INTERVAL.toString();
+    setRefreshInterval(intervalValue);
+    
+    // Save to cross-platform storage
+    await setStoredValue(REFRESH_INTERVAL_KEY, intervalValue);
+  }, [betAmountInput, refreshIntervalInput]);
+
+  // Memoize calculations before conditional returns (Rules of Hooks)
+  const arbs = results?.arbs || [];
+  
+  // Filter out in-progress or finished games if toggle is enabled
+  const filteredArbs = useMemo(() => {
+    if (hideInProgressGames) {
+      return arbs.filter((arb) => {
+        const gameStatus = results?.gameStatusMap[arb.gameId.toString()];
+        // If gameStatus exists and is not empty, the game is in progress or finished
+        return !gameStatus || gameStatus.trim() === '';
+      });
+    }
+    return arbs;
+  }, [arbs, hideInProgressGames, results?.gameStatusMap]);
+  
+  // Memoize parsed bet amount to avoid parsing on every render
+  // Use debounced value for calculations to prevent expensive recalculations on every keystroke
+  const totalBetAmount = useMemo(() => {
+    return parseFloat(betAmountForCalculation) || 100;
+  }, [betAmountForCalculation]);
+  
+  // Pre-calculate and memoize all list item data to prevent expensive recalculations
+  const processedArbs = useMemo(() => {
+    return filteredArbs.map((arb) => {
+      const gameLabel = results?.gameMap[arb.gameId.toString()] || `Game ${arb.gameId}`;
+      const playerName = results?.playerNameMap[arb.playerId.toString()] || `Player ${arb.playerId}`;
+      const gameTime = results?.gameTimeMap[arb.gameId.toString()];
+      const gameStatus = results?.gameStatusMap[arb.gameId.toString()];
+      const betAmounts = calculateBetAmounts(arb.over.odds, arb.under.odds, totalBetAmount);
+      const profit = calculateProfit(arb.over.odds, arb.under.odds, betAmounts.over, betAmounts.under, totalBetAmount);
+      const formattedProfit = formatProfit(profit);
+      const formattedEdge = formatEdge(arb.edge);
+      const formattedGameTime = gameTime ? formatDate(gameTime) : null;
+      const propTypeDisplay = arb.propType.charAt(0).toUpperCase() + arb.propType.slice(1);
+      const arbKey = `${arb.gameId}-${arb.playerId}-${arb.propType}-${arb.lineValue}-${arb.timestamp}`;
+      
+      return {
+        ...arb,
+        gameLabel,
+        playerName,
+        gameTime: formattedGameTime,
+        gameStatus,
+        betAmounts,
+        profit: formattedProfit,
+        edge: formattedEdge,
+        propTypeDisplay,
+        key: arbKey,
+      };
+    });
+  }, [filteredArbs, results?.gameMap, results?.playerNameMap, results?.gameTimeMap, results?.gameStatusMap, totalBetAmount]);
+  
+  const hasResults = processedArbs.length > 0;
 
   if (loading && !results) {
     return (
@@ -254,19 +481,6 @@ export default function ScanScreen() {
       </YStack>
     );
   }
-
-  const arbs = results?.arbs || [];
-  
-  // Filter out in-progress or finished games if toggle is enabled
-  const filteredArbs = hideInProgressGames
-    ? arbs.filter((arb) => {
-        const gameStatus = results?.gameStatusMap[arb.gameId.toString()];
-        // If gameStatus exists and is not empty, the game is in progress or finished
-        return !gameStatus || gameStatus.trim() === '';
-      })
-    : arbs;
-  
-  const hasResults = filteredArbs.length > 0;
 
   return (
     <YStack flex={1} backgroundColor="$background">
@@ -296,17 +510,8 @@ export default function ScanScreen() {
               </Label>
               <Input
                 id="bet-amount"
-                value={betAmount}
-                onChangeText={(text) => {
-                  // Only allow numbers and decimal point
-                  const numericValue = text.replace(/[^0-9.]/g, '');
-                  // Prevent multiple decimal points
-                  const parts = numericValue.split('.');
-                  const formatted = parts.length > 2 
-                    ? parts[0] + '.' + parts.slice(1).join('')
-                    : numericValue;
-                  setBetAmount(formatted);
-                }}
+                value={betAmountInput}
+                onChangeText={handleBetAmountInputChange}
                 keyboardType="numeric"
                 size="$3"
                 width={80}
@@ -322,8 +527,8 @@ export default function ScanScreen() {
               </Label>
               <Input
                 id="refresh-interval"
-                value={refreshInterval}
-                onChangeText={handleRefreshIntervalChange}
+                value={refreshIntervalInput}
+                onChangeText={handleRefreshIntervalInputChange}
                 keyboardType="numeric"
                 size="$3"
                 width={60}
@@ -336,6 +541,14 @@ export default function ScanScreen() {
                 sec
               </Text>
             </XStack>
+            <Button
+              size="$3"
+              theme="active"
+              onPress={handleSaveSettings}
+              paddingHorizontal="$3"
+            >
+              <Text fontSize="$3">Save</Text>
+            </Button>
           </XStack>
           <XStack alignItems="center" space="$3">
             <XStack alignItems="center" space="$2">
@@ -391,97 +604,14 @@ export default function ScanScreen() {
           </YStack>
         ) : (
           <YStack space="$4">
-            {filteredArbs.map((arb, index) => {
-              const gameLabel = results.gameMap[arb.gameId.toString()] || `Game ${arb.gameId}`;
-              const playerName = results.playerNameMap[arb.playerId.toString()] || `Player ${arb.playerId}`;
-              const gameTime = results.gameTimeMap[arb.gameId.toString()];
-              const gameStatus = results.gameStatusMap[arb.gameId.toString()];
-              const totalBetAmount = parseFloat(betAmount) || 100;
-              const betAmounts = calculateBetAmounts(arb.over.odds, arb.under.odds, totalBetAmount);
-
-              return (
-                <Card key={index} elevate padding="$4" backgroundColor="$backgroundStrong">
-                  <YStack space="$3">
-                    <XStack justifyContent="space-between" alignItems="flex-start">
-                      <YStack flex={1}>
-                        <Text fontSize="$6" fontWeight="bold" color="$color">
-                          {playerName}
-                        </Text>
-                        <Text fontSize="$4" color="$colorPress" marginTop="$1">
-                          {gameLabel}
-                        </Text>
-                        {gameTime && (
-                          <Text fontSize="$2" color="$colorPress" marginTop="$1">
-                            {formatDate(gameTime)}
-                          </Text>
-                        )}
-                        {gameStatus && (
-                          <Text fontSize="$2" color="$colorPress">
-                            {gameStatus}
-                          </Text>
-                        )}
-                      </YStack>
-                      <YStack alignItems="flex-end">
-                        <Text fontSize="$6" fontWeight="bold" color="$green10">
-                          {formatEdge(arb.edge)}
-                        </Text>
-                        <Text fontSize="$2" color="$colorPress">
-                          Arb Edge
-                        </Text>
-                        <Text fontSize="$4" fontWeight="600" color="$green10" marginTop="$1">
-                          {formatProfit(calculateProfit(arb.over.odds, arb.under.odds, betAmounts.over, betAmounts.under, totalBetAmount))}
-                        </Text>
-                        <Text fontSize="$2" color="$colorPress">
-                          Profit (${parseFloat(betAmount) || 100} bet)
-                        </Text>
-                      </YStack>
-                    </XStack>
-
-                    <Separator marginVertical="$2" />
-
-                    <YStack space="$2">
-                      <XStack justifyContent="space-between" alignItems="center">
-                        <Text fontSize="$4" fontWeight="600" color="$color">
-                          {arb.propType.charAt(0).toUpperCase() + arb.propType.slice(1)} {arb.lineValue}
-                        </Text>
-                      </XStack>
-
-                      <XStack justifyContent="space-between" space="$4">
-                        <YStack flex={1} padding="$3" backgroundColor="$green2" borderRadius="$2">
-                          <Text fontSize="$2" color="$green11" marginBottom="$1">
-                            OVER
-                          </Text>
-                          <Text fontSize="$5" fontWeight="bold" color="$green11">
-                            {formatOdds(arb.over.odds, useDecimalOdds)}
-                          </Text>
-                          <Text fontSize="$3" fontWeight="600" color="$green11" marginTop="$1">
-                            {formatProfit(betAmounts.over)}
-                          </Text>
-                          <Text fontSize="$2" color="$green11" marginTop="$1">
-                            {arb.over.vendor}
-                          </Text>
-                        </YStack>
-
-                        <YStack flex={1} padding="$3" backgroundColor="$red2" borderRadius="$2">
-                          <Text fontSize="$2" color="$red11" marginBottom="$1">
-                            UNDER
-                          </Text>
-                          <Text fontSize="$5" fontWeight="bold" color="$red11">
-                            {formatOdds(arb.under.odds, useDecimalOdds)}
-                          </Text>
-                          <Text fontSize="$3" fontWeight="600" color="$red11" marginTop="$1">
-                            {formatProfit(betAmounts.under)}
-                          </Text>
-                          <Text fontSize="$2" color="$red11" marginTop="$1">
-                            {arb.under.vendor}
-                          </Text>
-                        </YStack>
-                      </XStack>
-                    </YStack>
-                  </YStack>
-                </Card>
-              );
-            })}
+            {processedArbs.map((processed) => (
+              <ArbCard
+                key={processed.key}
+                arb={processed}
+                useDecimalOdds={useDecimalOdds}
+                betAmountDisplay={betAmountForCalculation}
+              />
+            ))}
           </YStack>
         )}
       </ScrollView>
