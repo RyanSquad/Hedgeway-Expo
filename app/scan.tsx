@@ -202,7 +202,7 @@ interface ProcessedArb extends ArbOpportunity {
   key: string;
 }
 
-// Format game time as MM/DD
+// Format game time as MM/DD with time and timezone
 function formatGameTimeForCSV(gameTime: string | null): string {
   if (!gameTime || gameTime === 'N/A') return 'N/A';
   try {
@@ -214,7 +214,13 @@ function formatGameTimeForCSV(gameTime: string | null): string {
     }
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
-    return `${month}/${day}`;
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    
+    // Get timezone abbreviation (e.g., EST, PST, EDT)
+    const timeZone = date.toLocaleString('en-US', { timeZoneName: 'short' }).split(' ').pop() || '';
+    
+    return `${month}/${day} ${hours}:${minutes} ${timeZone}`;
   } catch {
     return gameTime;
   }
@@ -224,8 +230,8 @@ function formatGameTimeForCSV(gameTime: string | null): string {
 function arbToCSV(arb: ProcessedArb, useDecimalOdds: boolean): string {
   const overOdds = formatOdds(arb.over.odds, useDecimalOdds);
   const underOdds = formatOdds(arb.under.odds, useDecimalOdds);
-  const profitValue = arb.profit.replace('$', '');
-  const edgeValue = arb.edge.replace('%', '');
+  const profitValue = arb.profit; // Keep $ sign
+  const edgeValue = arb.edge; // Keep % sign
   const overStake = arb.betAmounts.over.toFixed(2);
   const underStake = arb.betAmounts.under.toFixed(2);
   
@@ -233,7 +239,7 @@ function arbToCSV(arb: ProcessedArb, useDecimalOdds: boolean): string {
   const overFormatted = `${overOdds} (${arb.over.vendor}) ($${overStake})`;
   const underFormatted = `${underOdds} (${arb.under.vendor}) ($${underStake})`;
   
-  // Format game time as MM/DD (use raw timestamp if available, otherwise try formatted)
+  // Format game time as MM/DD with time (use raw timestamp if available, otherwise try formatted)
   const gameTimeFormatted = formatGameTimeForCSV(arb.gameTimeRaw || arb.gameTime);
   
   // Escape CSV values (handle commas and quotes)
