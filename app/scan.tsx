@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { get } from '../lib/api';
-import { RefreshControl } from 'react-native';
+import { RefreshControl, Pressable, View } from 'react-native';
 import { NavigationBar } from '../components/NavigationBar';
 
 interface ArbOpportunity {
@@ -193,12 +193,115 @@ interface ProcessedArb extends ArbOpportunity {
   gameLabel: string;
   playerName: string;
   gameTime: string | null;
+  gameTimeRaw: string | null; // Raw timestamp for CSV formatting
   gameStatus?: string;
   betAmounts: { over: number; under: number };
   profit: string;
   edge: string;
   propTypeDisplay: string;
   key: string;
+}
+
+// Format game time as MM/DD
+function formatGameTimeForCSV(gameTime: string | null): string {
+  if (!gameTime || gameTime === 'N/A') return 'N/A';
+  try {
+    // Try parsing as date (handles both timestamp strings and formatted dates)
+    const date = new Date(gameTime);
+    // Check if date is valid
+    if (isNaN(date.getTime())) {
+      return gameTime;
+    }
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${month}/${day}`;
+  } catch {
+    return gameTime;
+  }
+}
+
+// Convert arb to CSV format (without header)
+function arbToCSV(arb: ProcessedArb, useDecimalOdds: boolean): string {
+  const overOdds = formatOdds(arb.over.odds, useDecimalOdds);
+  const underOdds = formatOdds(arb.under.odds, useDecimalOdds);
+  const profitValue = arb.profit.replace('$', '');
+  const edgeValue = arb.edge.replace('%', '');
+  const overStake = arb.betAmounts.over.toFixed(2);
+  const underStake = arb.betAmounts.under.toFixed(2);
+  
+  // Format Over and Under with book and stake: "odds (book) ($stake)"
+  const overFormatted = `${overOdds} (${arb.over.vendor}) ($${overStake})`;
+  const underFormatted = `${underOdds} (${arb.under.vendor}) ($${underStake})`;
+  
+  // Format game time as MM/DD (use raw timestamp if available, otherwise try formatted)
+  const gameTimeFormatted = formatGameTimeForCSV(arb.gameTimeRaw || arb.gameTime);
+  
+  // Escape CSV values (handle commas and quotes)
+  const escapeCSV = (value: string | number): string => {
+    const str = String(value);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+  
+  // Order: Edge, Game, Game Start Time, Player, Prop, Line, Over, Under, Profit
+  return [
+    escapeCSV(edgeValue),
+    escapeCSV(arb.gameLabel),
+    escapeCSV(gameTimeFormatted),
+    escapeCSV(arb.playerName),
+    escapeCSV(arb.propTypeDisplay),
+    escapeCSV(arb.lineValue),
+    escapeCSV(overFormatted),
+    escapeCSV(underFormatted),
+    escapeCSV(profitValue),
+  ].join(',');
+}
+
+// Copy text to clipboard (web only)
+async function copyToClipboard(text: string): Promise<boolean> {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+    return false;
+  }
+  
+  // Try modern Clipboard API first
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      console.log('Copied to clipboard via Clipboard API');
+      return true;
+    } catch (error) {
+      console.warn('Clipboard API failed, trying fallback:', error);
+      // Fall through to fallback method
+    }
+  }
+  
+  // Fallback method using execCommand (works in more contexts)
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    
+    if (successful) {
+      console.log('Copied to clipboard via execCommand');
+      return true;
+    } else {
+      console.error('execCommand copy failed');
+      return false;
+    }
+  } catch (error) {
+    console.error('Failed to copy to clipboard:', error);
+    return false;
+  }
 }
 
 const ArbCard = memo(({ 
@@ -210,8 +313,39 @@ const ArbCard = memo(({
   useDecimalOdds: boolean; 
   betAmountDisplay: string;
 }) => {
-  return (
-    <Card elevate padding="$4" backgroundColor="$backgroundStrong">
+  const handleClick = async () => {
+    if (Platform.OS === 'web') {
+      try {
+        const csv = arbToCSV(arb, useDecimalOdds);
+        console.log('Attempting to copy CSV:', csv.substring(0, 100) + '...');
+        const success = await copyToClipboard(csv);
+        if (success) {
+          console.log('Successfully copied to clipboard');
+        } else {
+          console.error('Failed to copy to clipboard');
+          // Try alternative method
+          if (typeof window !== 'undefined' && window.navigator && window.navigator.clipboard) {
+            console.log('Retrying with direct clipboard API...');
+            try {
+              await window.navigator.clipboard.writeText(csv);
+              console.log('Successfully copied via direct API');
+            } catch (err) {
+              console.error('Direct API also failed:', err);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error in handleClick:', error);
+      }
+    }
+  };
+
+  const cardContent = (
+    <Card 
+      elevate 
+      padding="$4" 
+      backgroundColor="$backgroundStrong"
+    >
       <YStack space="$3">
         <XStack justifyContent="space-between" alignItems="flex-start">
           <YStack flex={1}>
@@ -292,6 +426,20 @@ const ArbCard = memo(({
       </YStack>
     </Card>
   );
+
+  if (Platform.OS === 'web') {
+    // Use Pressable which works on web, but also add onClick as fallback
+    return (
+      <Pressable 
+        onPress={handleClick}
+        style={{ cursor: 'pointer' }}
+      >
+        {cardContent}
+      </Pressable>
+    );
+  }
+
+  return cardContent;
 });
 
 ArbCard.displayName = 'ArbCard';
@@ -444,6 +592,7 @@ export default function ScanScreen() {
         gameLabel,
         playerName,
         gameTime: formattedGameTime,
+        gameTimeRaw: gameTime || null, // Store raw timestamp for CSV
         gameStatus,
         betAmounts,
         profit: formattedProfit,
