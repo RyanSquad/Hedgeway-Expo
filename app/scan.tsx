@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { get } from '../lib/api';
-import { RefreshControl, Pressable, View } from 'react-native';
+import { RefreshControl, Pressable, View, useWindowDimensions } from 'react-native';
 import { NavigationBar } from '../components/NavigationBar';
 
 interface ArbOpportunity {
@@ -451,6 +451,9 @@ const ArbCard = memo(({
 ArbCard.displayName = 'ArbCard';
 
 export default function ScanScreen() {
+  const { width } = useWindowDimensions();
+  const isMobile = width < 700; // Use single column on screens narrower than 700px
+  
   const [results, setResults] = useState<ScanResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -757,7 +760,7 @@ export default function ScanScreen() {
                 : 'Run a scan to see results'}
             </Text>
           </YStack>
-        ) : (
+        ) : isMobile ? (
           <YStack space="$4">
             {processedArbs.map((processed) => (
               <ArbCard
@@ -768,6 +771,18 @@ export default function ScanScreen() {
               />
             ))}
           </YStack>
+        ) : (
+          <XStack flexWrap="wrap" space="$4">
+            {processedArbs.map((processed) => (
+              <YStack key={processed.key} flex={1} minWidth="48%" maxWidth="48%" marginBottom={Platform.OS === 'web' ? "$4" : undefined}>
+                <ArbCard
+                  arb={processed}
+                  useDecimalOdds={useDecimalOdds}
+                  betAmountDisplay={betAmountForCalculation}
+                />
+              </YStack>
+            ))}
+          </XStack>
         )}
       </ScrollView>
 
