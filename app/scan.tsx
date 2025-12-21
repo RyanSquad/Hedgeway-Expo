@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef, memo, useId } from 'react';
 import { YStack, XStack, Text, ScrollView, Spinner, Card, Separator, Switch, Label, Input, Button } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
@@ -454,6 +454,12 @@ export default function ScanScreen() {
   const { width } = useWindowDimensions();
   const isMobile = width < 700; // Use single column on screens narrower than 700px
   
+  // Generate unique IDs for form inputs to prevent duplicate ID warnings
+  const betAmountId = useId();
+  const refreshIntervalId = useId();
+  const oddsToggleId = useId();
+  const filterToggleId = useId();
+  
   const [results, setResults] = useState<ScanResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -663,11 +669,11 @@ export default function ScanScreen() {
         <XStack justifyContent="space-between" alignItems="center" marginTop="$2">
           <XStack alignItems="center" space="$3">
             <XStack alignItems="center" space="$2">
-              <Label htmlFor="bet-amount" fontSize="$2" color="$colorPress">
+              <Label htmlFor={betAmountId} fontSize="$2" color="$colorPress">
                 Bet Amount: $
               </Label>
               <Input
-                id="bet-amount"
+                id={betAmountId}
                 value={betAmountInput}
                 onChangeText={handleBetAmountInputChange}
                 keyboardType="numeric"
@@ -680,11 +686,11 @@ export default function ScanScreen() {
               />
             </XStack>
             <XStack alignItems="center" space="$2">
-              <Label htmlFor="refresh-interval" fontSize="$2" color="$colorPress">
+              <Label htmlFor={refreshIntervalId} fontSize="$2" color="$colorPress">
                 Refresh: 
               </Label>
               <Input
-                id="refresh-interval"
+                id={refreshIntervalId}
                 value={refreshIntervalInput}
                 onChangeText={handleRefreshIntervalInputChange}
                 keyboardType="numeric"
@@ -710,11 +716,11 @@ export default function ScanScreen() {
           </XStack>
           <XStack alignItems="center" space="$3">
             <XStack alignItems="center" space="$2">
-              <Label htmlFor="odds-toggle" fontSize="$2" color="$colorPress">
+              <Label htmlFor={oddsToggleId} fontSize="$2" color="$colorPress">
                 {useDecimalOdds ? 'Decimal' : 'American'}
               </Label>
               <Switch
-                id="odds-toggle"
+                id={oddsToggleId}
                 checked={useDecimalOdds}
                 onCheckedChange={setUseDecimalOdds}
                 size="$3"
@@ -723,11 +729,11 @@ export default function ScanScreen() {
               </Switch>
             </XStack>
             <XStack alignItems="center" space="$2">
-              <Label htmlFor="filter-toggle" fontSize="$2" color="$colorPress">
+              <Label htmlFor={filterToggleId} fontSize="$2" color="$colorPress">
                 Hide Live/Finished
               </Label>
               <Switch
-                id="filter-toggle"
+                id={filterToggleId}
                 checked={hideInProgressGames}
                 onCheckedChange={setHideInProgressGames}
                 size="$3"
