@@ -3,6 +3,7 @@ import { YStack, XStack, Text, Button, Input, Card, Spinner } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { post } from '../lib/api';
 import { tokenStorage } from '../lib/tokenStorage';
 
@@ -38,9 +39,16 @@ export default function HomeScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async () => {
+    // Prevent multiple simultaneous requests
+    if (isSubmitting) {
+      return;
+    }
+
     if (!email || !password) {
       setError('Please fill in all required fields');
       return;
@@ -51,8 +59,16 @@ export default function HomeScreen() {
       return;
     }
 
+    setIsSubmitting(true);
     setLoading(true);
     setError(null);
+    
+    // Set loading message for login to account for backend delay
+    if (isLogin) {
+      setLoadingMessage('Authenticating...');
+    } else {
+      setLoadingMessage('Creating account...');
+    }
 
     try {
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
@@ -61,60 +77,170 @@ export default function HomeScreen() {
         ? { email, password }
         : { email, password, passwordConfirmation: confirmPassword };
 
-      const response = await post<LoginResponse | RegisterResponse>(endpoint, body);
+      // For login, use fetch with timeout to handle backend delay
+      if (isLogin) {
+        const LOGIN_TIMEOUT = 10000; // 10 seconds total timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), LOGIN_TIMEOUT);
 
-      if (response.error) {
-        setError(response.error);
-        setLoading(false);
-        return;
-      }
+        try {
+          // Get API base URL (same logic as in api.ts)
+          const API_BASE_URL = 
+            Constants.expoConfig?.extra?.apiUrl || 
+            process.env.EXPO_PUBLIC_API_URL || 
+            'https://hedgeway-server-production.up.railway.app';
 
-      if (!response.data) {
-        setError('No data received from server');
-        setLoading(false);
-        return;
-      }
+          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
 
-      // Extract tokens from response
-      const data = response.data as any;
-      // New API format: { success: true, accessToken: "...", refreshToken: "...", expiresIn: "15m", user: {...} }
-      // Old API format (backward compatibility): { success: true, token: "...", user: {...} }
-      const accessToken = data?.accessToken || data?.token;
-      const refreshToken = data?.refreshToken;
-      const expiresIn = data?.expiresIn || '900'; // Default 15 minutes if not provided
-      
-      if (accessToken && typeof accessToken === 'string') {
-        // If we have a refresh token, use the new token storage system
-        if (refreshToken && typeof refreshToken === 'string') {
-          const stored = await tokenStorage.setTokens(accessToken, refreshToken, expiresIn);
+          clearTimeout(timeoutId);
+
+          const contentType = response.headers.get('content-type');
+          let data: any;
           
-          if (stored) {
-            // Navigate to landing page after tokens are confirmed stored
-            router.replace('/home');
+          if (contentType && contentType.includes('application/json')) {
+            const text = await response.text();
+            try {
+              data = text ? JSON.parse(text) : {};
+            } catch {
+              data = { error: text || 'Invalid JSON response' };
+            }
           } else {
-            setError('Failed to store authentication tokens. Please try again.');
-            setLoading(false);
+            const text = await response.text();
+            data = text ? { error: text } : { error: 'Invalid response format' };
           }
-        } else {
-          // Backward compatibility: only access token (old API format)
-          // Store as access token only (refresh will not work until backend is updated)
-          console.warn('No refresh token received. Refresh token functionality will not work.');
-          const stored = await tokenStorage.setTokens(accessToken, '', expiresIn);
+
+          if (!response.ok) {
+            setError(data.error || data.message || 'Login failed');
+            setLoading(false);
+            setLoadingMessage('');
+            setIsSubmitting(false);
+            return;
+          }
+
+          // Process successful login response
+          const accessToken = data?.accessToken || data?.token;
+          const refreshToken = data?.refreshToken;
+          const expiresIn = data?.expiresIn || '900'; // Default 15 minutes if not provided
           
-          if (stored) {
-            router.replace('/home');
+          if (accessToken && typeof accessToken === 'string') {
+            // If we have a refresh token, use the new token storage system
+            if (refreshToken && typeof refreshToken === 'string') {
+              const stored = await tokenStorage.setTokens(accessToken, refreshToken, expiresIn);
+              
+              if (stored) {
+                // Navigate to landing page after tokens are confirmed stored
+                router.replace('/home');
+              } else {
+                setError('Failed to store authentication tokens. Please try again.');
+                setLoading(false);
+                setLoadingMessage('');
+                setIsSubmitting(false);
+              }
+            } else {
+              // Backward compatibility: only access token (old API format)
+              console.warn('No refresh token received. Refresh token functionality will not work.');
+              const stored = await tokenStorage.setTokens(accessToken, '', expiresIn);
+              
+              if (stored) {
+                router.replace('/home');
+              } else {
+                setError('Failed to store authentication token. Please try again.');
+                setLoading(false);
+                setLoadingMessage('');
+                setIsSubmitting(false);
+              }
+            }
           } else {
-            setError('Failed to store authentication token. Please try again.');
+            setError('No access token received from server. Please try again.');
             setLoading(false);
+            setLoadingMessage('');
+            setIsSubmitting(false);
           }
+        } catch (err) {
+          clearTimeout(timeoutId);
+          
+          if (err instanceof Error && err.name === 'AbortError') {
+            setError('Login request timed out. Please try again.');
+          } else {
+            setError(err instanceof Error ? err.message : 'An error occurred');
+          }
+          setLoading(false);
+          setLoadingMessage('');
+          setIsSubmitting(false);
         }
       } else {
-        setError('No access token received from server. Please try again.');
-        setLoading(false);
+        // For register, use the existing post helper
+        const response = await post<RegisterResponse>(endpoint, body);
+
+        if (response.error) {
+          setError(response.error);
+          setLoading(false);
+          setLoadingMessage('');
+          setIsSubmitting(false);
+          return;
+        }
+
+        if (!response.data) {
+          setError('No data received from server');
+          setLoading(false);
+          setLoadingMessage('');
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Extract tokens from response
+        const data = response.data as any;
+        const accessToken = data?.accessToken || data?.token;
+        const refreshToken = data?.refreshToken;
+        const expiresIn = data?.expiresIn || '900'; // Default 15 minutes if not provided
+        
+        if (accessToken && typeof accessToken === 'string') {
+          // If we have a refresh token, use the new token storage system
+          if (refreshToken && typeof refreshToken === 'string') {
+            const stored = await tokenStorage.setTokens(accessToken, refreshToken, expiresIn);
+            
+            if (stored) {
+              // Navigate to landing page after tokens are confirmed stored
+              router.replace('/home');
+            } else {
+              setError('Failed to store authentication tokens. Please try again.');
+              setLoading(false);
+              setLoadingMessage('');
+              setIsSubmitting(false);
+            }
+          } else {
+            // Backward compatibility: only access token (old API format)
+            console.warn('No refresh token received. Refresh token functionality will not work.');
+            const stored = await tokenStorage.setTokens(accessToken, '', expiresIn);
+            
+            if (stored) {
+              router.replace('/home');
+            } else {
+              setError('Failed to store authentication token. Please try again.');
+              setLoading(false);
+              setLoadingMessage('');
+              setIsSubmitting(false);
+            }
+          }
+        } else {
+          setError('No access token received from server. Please try again.');
+          setLoading(false);
+          setLoadingMessage('');
+          setIsSubmitting(false);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
       setLoading(false);
+      setLoadingMessage('');
+      setIsSubmitting(false);
     }
   };
 
@@ -227,13 +353,13 @@ export default function HomeScreen() {
               theme="active"
               size="$4"
               onPress={handleSubmit}
-              disabled={loading}
+              disabled={loading || isSubmitting}
               marginTop="$1"
             >
               {loading ? (
                 <XStack alignItems="center" space="$2">
                   <Spinner size="small" color="$color" />
-                  <Text color="$color">Please wait...</Text>
+                  <Text color="$color">{loadingMessage || (isLogin ? 'Logging in...' : 'Please wait...')}</Text>
                 </XStack>
               ) : (
                 <Text color="$color">{isLogin ? 'Sign In' : 'Sign Up'}</Text>
