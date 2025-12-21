@@ -3,10 +3,14 @@ import { YStack, XStack, Text, Button, Input, Card, Spinner } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { Platform } from 'react-native';
-import { post, setAuthToken, getAuthToken } from '../lib/api';
+import { post } from '../lib/api';
+import { tokenStorage } from '../lib/tokenStorage';
 
 interface LoginResponse {
-  token: string;
+  accessToken?: string;
+  token?: string; // Backward compatibility
+  refreshToken?: string;
+  expiresIn?: string;
   user?: {
     id: string;
     email: string;
@@ -15,10 +19,14 @@ interface LoginResponse {
 }
 
 interface RegisterResponse {
-  token?: string;
+  accessToken?: string;
+  token?: string; // Backward compatibility
+  refreshToken?: string;
+  expiresIn?: string;
   user?: {
     id: string;
     email: string;
+    role?: string;
   };
   message?: string;
 }
@@ -67,24 +75,41 @@ export default function HomeScreen() {
         return;
       }
 
-      // Extract token from response - according to API docs, token is directly in response.data
+      // Extract tokens from response
       const data = response.data as any;
-      // API returns: { success: true, token: "...", user: {...} }
-      const token = data?.token;
+      // New API format: { success: true, accessToken: "...", refreshToken: "...", expiresIn: "15m", user: {...} }
+      // Old API format (backward compatibility): { success: true, token: "...", user: {...} }
+      const accessToken = data?.accessToken || data?.token;
+      const refreshToken = data?.refreshToken;
+      const expiresIn = data?.expiresIn || '900'; // Default 15 minutes if not provided
       
-      if (token && typeof token === 'string') {
-        // Store token securely before navigation
-        const stored = await setAuthToken(token);
-        
-        if (stored) {
-          // Navigate to landing page after token is confirmed stored
-          router.replace('/home');
+      if (accessToken && typeof accessToken === 'string') {
+        // If we have a refresh token, use the new token storage system
+        if (refreshToken && typeof refreshToken === 'string') {
+          const stored = await tokenStorage.setTokens(accessToken, refreshToken, expiresIn);
+          
+          if (stored) {
+            // Navigate to landing page after tokens are confirmed stored
+            router.replace('/home');
+          } else {
+            setError('Failed to store authentication tokens. Please try again.');
+            setLoading(false);
+          }
         } else {
-          setError('Failed to store authentication token. Please try again.');
-          setLoading(false);
+          // Backward compatibility: only access token (old API format)
+          // Store as access token only (refresh will not work until backend is updated)
+          console.warn('No refresh token received. Refresh token functionality will not work.');
+          const stored = await tokenStorage.setTokens(accessToken, '', expiresIn);
+          
+          if (stored) {
+            router.replace('/home');
+          } else {
+            setError('Failed to store authentication token. Please try again.');
+            setLoading(false);
+          }
         }
       } else {
-        setError('No token received from server. Please try again.');
+        setError('No access token received from server. Please try again.');
         setLoading(false);
       }
     } catch (err) {

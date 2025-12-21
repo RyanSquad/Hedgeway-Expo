@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { XStack, YStack, Button, Sheet, Text, Separator } from 'tamagui';
 import { useRouter, usePathname } from 'expo-router';
-import { clearAuthToken } from '../lib/api';
+import { logout } from '../lib/api';
 import { useAuth } from '../lib/useAuth';
 
 export function MenuButton() {
@@ -11,7 +11,7 @@ export function MenuButton() {
   const { user, isSuperAdmin } = useAuth();
 
   const handleLogout = async () => {
-    await clearAuthToken();
+    await logout();
     setOpen(false);
     router.replace('/');
   };
