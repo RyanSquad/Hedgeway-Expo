@@ -1,11 +1,13 @@
 import { XStack, Text } from 'tamagui';
 import { usePathname } from 'expo-router';
+import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MenuButton } from './MenuButton';
 
 export function NavigationBar() {
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const isWeb = Platform.OS === 'web';
 
   // Get page title based on pathname
   const getPageTitle = () => {
@@ -21,6 +23,12 @@ export function NavigationBar() {
     }
   };
 
+  // On web, don't render NavigationBar (sidebar handles navigation)
+  if (isWeb) {
+    return null;
+  }
+
+  // Mobile/native: render existing navigation bar
   return (
     <XStack 
       padding="$3" 
