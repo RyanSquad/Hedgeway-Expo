@@ -3,7 +3,7 @@ import { YStack, XStack, Text, ScrollView, Spinner, Card, Separator, Switch, Lab
 import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import { get } from '../lib/api';
+import { get, clearCache } from '../lib/api';
 import { RefreshControl, Pressable, View, useWindowDimensions } from 'react-native';
 import { NavigationBar } from '../components/NavigationBar';
 
@@ -466,10 +466,16 @@ export default function ScanScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [useDecimalOdds, setUseDecimalOdds] = useState(false);
   const [hideInProgressGames, setHideInProgressGames] = useState(false);
+  const [lastResponseTime, setLastResponseTime] = useState<number | null>(null);
+  const [isFromCache, setIsFromCache] = useState(false);
   
   // Debouncing state for manual refresh
   const lastRefreshTimeRef = useRef<number>(0);
   const MIN_RELOAD_INTERVAL = 2000; // 2 seconds minimum between reloads (accounts for backend delay ~1.5s)
+  
+  // Track response times for adaptive polling
+  const responseTimeHistoryRef = useRef<number[]>([]);
+  const MAX_RESPONSE_TIME_HISTORY = 5;
   
   // Input values (for display only, don't trigger calculations)
   const [betAmountInput, setBetAmountInput] = useState<string>('100');
@@ -494,17 +500,40 @@ export default function ScanScreen() {
     loadStoredInterval();
   }, []);
 
-  const fetchScanResults = useCallback(async (isRefreshing = false) => {
+  const fetchScanResults = useCallback(async (isManualRefresh = false, skipCache = false) => {
     try {
-      if (isRefreshing) {
+      if (isManualRefresh) {
         setRefreshing(true);
       } else {
         setLoading(true);
       }
       setError(null);
+      setIsFromCache(false);
 
       const startTime = Date.now();
-      const response = await get<ScanResults>('/api/scan/results');
+      
+      // Use client-side caching for automatic refreshes (not manual)
+      // Cache TTL should match backend cache (default 5 seconds)
+      const response = await get<ScanResults>('/api/scan/results', {
+        useCache: !skipCache && !isManualRefresh, // Don't use cache for manual refreshes
+        cacheTTL: 5, // 5 seconds to match backend cache
+      });
+      
+      const duration = Date.now() - startTime;
+      setLastResponseTime(duration);
+      
+      // Track response times for adaptive polling
+      if (response.data && !response.error) {
+        responseTimeHistoryRef.current.push(duration);
+        if (responseTimeHistoryRef.current.length > MAX_RESPONSE_TIME_HISTORY) {
+          responseTimeHistoryRef.current.shift();
+        }
+      }
+      
+      // Check if response was from cache (very fast response, likely cached)
+      if (duration < 200 && response.data && !response.error) {
+        setIsFromCache(true);
+      }
       
       if (response.error) {
         setError(response.error);
@@ -512,10 +541,11 @@ export default function ScanScreen() {
       } else if (response.data) {
         setResults(response.data);
         
-        // Log timing for debugging (includes backend delay ~1.5s)
-        const duration = Date.now() - startTime;
+        // Log timing for debugging
         if (duration > 1000) {
           console.log(`[Scan] Results loaded in ${duration}ms (includes backend delay)`);
+        } else if (duration < 200) {
+          console.log(`[Scan] Results loaded from cache in ${duration}ms`);
         }
       }
     } catch (err) {
@@ -528,30 +558,54 @@ export default function ScanScreen() {
   }, []);
 
   useEffect(() => {
-    // Clear any existing polling interval
+    // Clear any existing polling timeout
     if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
+      clearTimeout(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
     }
 
     // Initial fetch
     fetchScanResults();
 
-    // Set up auto-refresh with user-defined interval
-    // Account for backend delay (~1.5s) by ensuring minimum interval is reasonable
-    const intervalSeconds = parseInt(refreshInterval, 10) || DEFAULT_REFRESH_INTERVAL;
-    // Minimum 3 seconds to account for backend delay (1.5s) + processing time
-    const minIntervalSeconds = 3;
-    const effectiveIntervalSeconds = Math.max(minIntervalSeconds, intervalSeconds);
-    const intervalMs = effectiveIntervalSeconds * 1000;
+    // Set up adaptive polling based on user-defined interval and response times
+    const calculateAdaptiveInterval = (): number => {
+      const baseIntervalSeconds = parseInt(refreshInterval, 10) || DEFAULT_REFRESH_INTERVAL;
+      
+      // If we have response time history, adjust interval based on average response time
+      if (responseTimeHistoryRef.current.length > 0) {
+        const avgResponseTime = responseTimeHistoryRef.current.reduce((a, b) => a + b, 0) / responseTimeHistoryRef.current.length;
+        
+        // If responses are fast (cached), we can poll more frequently
+        // If responses are slow (progressive delays active), poll less frequently
+        if (avgResponseTime < 500) {
+          // Fast responses - use base interval (could be more aggressive)
+          return Math.max(3, baseIntervalSeconds);
+        } else if (avgResponseTime > 2000) {
+          // Slow responses - add buffer to prevent overload
+          return Math.max(5, baseIntervalSeconds + Math.ceil(avgResponseTime / 1000));
+        }
+      }
+      
+      // Default: minimum 3 seconds to account for backend delay (1.5s) + processing time
+      return Math.max(3, baseIntervalSeconds);
+    };
 
-    pollingIntervalRef.current = setInterval(() => {
-      fetchScanResults(true);
-    }, intervalMs);
+    const scheduleNextPoll = () => {
+      const effectiveIntervalSeconds = calculateAdaptiveInterval();
+      const intervalMs = effectiveIntervalSeconds * 1000;
+
+      pollingIntervalRef.current = setTimeout(() => {
+        fetchScanResults(false, false); // Auto-refresh, use cache
+        scheduleNextPoll();
+      }, intervalMs);
+    };
+
+    // Start adaptive polling after initial fetch
+    scheduleNextPoll();
 
     return () => {
       if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
+        clearTimeout(pollingIntervalRef.current);
         pollingIntervalRef.current = null;
       }
     };
@@ -570,7 +624,7 @@ export default function ScanScreen() {
     const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
     
     // Prevent rapid refresh requests (debouncing)
-    // Backend has ~1.5s delay, so minimum 2 seconds between refreshes to prevent overload
+    // Backend has progressive delays, so minimum 2 seconds between refreshes to prevent overload
     if (timeSinceLastRefresh < MIN_RELOAD_INTERVAL) {
       const remaining = Math.ceil((MIN_RELOAD_INTERVAL - timeSinceLastRefresh) / 1000);
       console.log(`[Scan] Please wait ${remaining} second(s) before refreshing again`);
@@ -579,7 +633,11 @@ export default function ScanScreen() {
     }
     
     lastRefreshTimeRef.current = now;
-    fetchScanResults(true);
+    
+    // Clear cache for manual refresh to get fresh data
+    clearCache('/api/scan/results');
+    
+    fetchScanResults(true, true); // Manual refresh, skip cache
   }, [fetchScanResults]);
 
   const handleBetAmountInputChange = useCallback((text: string) => {
@@ -783,13 +841,23 @@ export default function ScanScreen() {
             </XStack>
           </XStack>
         </XStack>
-        <XStack alignItems="center" space="$2" marginTop="$2">
+        <XStack alignItems="center" space="$2" marginTop="$2" flexWrap="wrap">
           <Text fontSize="$2" color="$colorPress">
             Auto-refreshing every {Math.max(3, parseInt(refreshInterval, 10) || DEFAULT_REFRESH_INTERVAL)} seconds
           </Text>
           {refreshing && (
             <Text fontSize="$2" color="$blue10">
               (refreshing...)
+            </Text>
+          )}
+          {isFromCache && lastResponseTime !== null && lastResponseTime < 200 && (
+            <Text fontSize="$2" color="$green10">
+              (cached, {lastResponseTime}ms)
+            </Text>
+          )}
+          {lastResponseTime !== null && lastResponseTime > 2000 && (
+            <Text fontSize="$2" color="$orange10">
+              (slow response: {Math.round(lastResponseTime / 100) / 10}s)
             </Text>
           )}
         </XStack>

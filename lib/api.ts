@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { tokenStorage } from './tokenStorage';
+import { get as cacheGet, set as cacheSet, generateCacheKey, del as cacheDel } from './cacheService';
 
 // Base API URL - configure in app.json or environment variables
 export const API_BASE_URL = 
@@ -10,6 +11,9 @@ export const API_BASE_URL =
 // Token refresh state management
 let isRefreshing = false;
 let failedQueue: Array<{ resolve: (token: string | null) => void; reject: (error: Error) => void }> = [];
+
+// Request deduplication: track ongoing requests by endpoint
+const ongoingRequests = new Map<string, Promise<ApiResponse<any>>>();
 
 const processQueue = (error: Error | null, token: string | null = null) => {
   failedQueue.forEach(prom => {
@@ -204,9 +208,9 @@ export async function apiRequest<T>(
     const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
     // Build headers - ensure Authorization is included if token exists
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...(options.headers as Record<string, string> || {}),
     };
 
     // Add Authorization header if token exists (override any existing Authorization header)
@@ -254,10 +258,13 @@ export async function apiRequest<T>(
           const newAccessToken = await refreshAccessToken();
           
           // Retry original request with new token
-          headers['Authorization'] = `Bearer ${newAccessToken}`;
+          const retryHeaders: Record<string, string> = {
+            ...headers,
+            'Authorization': `Bearer ${newAccessToken}`,
+          };
           response = await fetch(url, {
             ...options,
-            headers,
+            headers: retryHeaders,
           });
           
           // Re-parse response after retry
@@ -292,8 +299,11 @@ export async function apiRequest<T>(
           failedQueue.push({ 
             resolve: async (newToken) => {
               if (newToken) {
-                headers['Authorization'] = `Bearer ${newToken}`;
-                const retryResponse = await fetch(url, { ...options, headers });
+                const retryHeaders: Record<string, string> = {
+                  ...headers,
+                  'Authorization': `Bearer ${newToken}`,
+                };
+                const retryResponse = await fetch(url, { ...options, headers: retryHeaders });
                 const retryText = await retryResponse.text();
                 let retryData;
                 if (retryResponse.headers.get('content-type')?.includes('application/json')) {
@@ -384,10 +394,72 @@ export async function apiRequest<T>(
 }
 
 /**
- * GET request helper
+ * GET request helper with optional caching
+ * @param endpoint - API endpoint
+ * @param options - Optional configuration for caching and request behavior
  */
-export async function get<T>(endpoint: string): Promise<ApiResponse<T>> {
-  return apiRequest<T>(endpoint, { method: 'GET' });
+export async function get<T>(
+  endpoint: string,
+  options?: {
+    useCache?: boolean;
+    cacheTTL?: number;
+    skipDeduplication?: boolean;
+  }
+): Promise<ApiResponse<T>> {
+  const { useCache = false, cacheTTL, skipDeduplication = false } = options || {};
+
+  // Check cache first if enabled
+  if (useCache) {
+    const cacheKey = generateCacheKey(endpoint);
+    const cached = cacheGet<T>(cacheKey);
+    if (cached !== null) {
+      console.log(`[API] Cache hit for ${endpoint}`);
+      return { data: cached, error: undefined };
+    }
+  }
+
+  // Check for duplicate ongoing request (deduplication)
+  if (!skipDeduplication) {
+    const ongoingRequest = ongoingRequests.get(endpoint);
+    if (ongoingRequest) {
+      console.log(`[API] Deduplicating request for ${endpoint}`);
+      return ongoingRequest as Promise<ApiResponse<T>>;
+    }
+  }
+
+  // Make the request
+  const requestPromise = apiRequest<T>(endpoint, { method: 'GET' }).then((response) => {
+    // Remove from ongoing requests
+    ongoingRequests.delete(endpoint);
+
+    // Cache successful responses if enabled
+    if (useCache && response.data && !response.error) {
+      const cacheKey = generateCacheKey(endpoint);
+      cacheSet(cacheKey, response.data, cacheTTL);
+    }
+
+    return response;
+  }).catch((error) => {
+    // Remove from ongoing requests on error
+    ongoingRequests.delete(endpoint);
+    throw error;
+  });
+
+  // Track ongoing request
+  if (!skipDeduplication) {
+    ongoingRequests.set(endpoint, requestPromise);
+  }
+
+  return requestPromise;
+}
+
+/**
+ * Clear cache for a specific endpoint
+ * @param endpoint - API endpoint to clear from cache
+ */
+export function clearCache(endpoint: string): void {
+  const cacheKey = generateCacheKey(endpoint);
+  cacheDel(cacheKey);
 }
 
 /**
