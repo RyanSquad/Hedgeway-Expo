@@ -3,8 +3,7 @@ import { YStack, XStack, Text, Button, Input, Card, Spinner } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { Platform } from 'react-native';
-import Constants from 'expo-constants';
-import { post } from '../lib/api';
+import { post, API_BASE_URL } from '../lib/api';
 import { tokenStorage } from '../lib/tokenStorage';
 
 interface LoginResponse {
@@ -82,14 +81,10 @@ export default function HomeScreen() {
         const LOGIN_TIMEOUT = 10000; // 10 seconds total timeout
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), LOGIN_TIMEOUT);
+        const startTime = Date.now();
 
         try {
-          // Get API base URL (same logic as in api.ts)
-          const API_BASE_URL = 
-            Constants.expoConfig?.extra?.apiUrl || 
-            process.env.EXPO_PUBLIC_API_URL || 
-            'https://hedgeway-server-production.up.railway.app';
-
+          // Use shared API_BASE_URL to ensure consistency
           const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: 'POST',
             headers: {
@@ -100,6 +95,8 @@ export default function HomeScreen() {
           });
 
           clearTimeout(timeoutId);
+          const requestDuration = Date.now() - startTime;
+          console.log(`[Login] Request completed in ${requestDuration}ms (expected ~2000ms with backend delay)`);
 
           const contentType = response.headers.get('content-type');
           let data: any;
@@ -165,6 +162,8 @@ export default function HomeScreen() {
           }
         } catch (err) {
           clearTimeout(timeoutId);
+          const errorDuration = Date.now() - startTime;
+          console.log(`[Login] Request failed after ${errorDuration}ms`);
           
           if (err instanceof Error && err.name === 'AbortError') {
             setError('Login request timed out. Please try again.');

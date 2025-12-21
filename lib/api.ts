@@ -2,7 +2,7 @@ import Constants from 'expo-constants';
 import { tokenStorage } from './tokenStorage';
 
 // Base API URL - configure in app.json or environment variables
-const API_BASE_URL = 
+export const API_BASE_URL = 
   Constants.expoConfig?.extra?.apiUrl || 
   process.env.EXPO_PUBLIC_API_URL || 
   'https://hedgeway-server-production.up.railway.app';
