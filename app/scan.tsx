@@ -467,6 +467,10 @@ export default function ScanScreen() {
   const [useDecimalOdds, setUseDecimalOdds] = useState(false);
   const [hideInProgressGames, setHideInProgressGames] = useState(false);
   
+  // Debouncing state for manual refresh
+  const lastRefreshTimeRef = useRef<number>(0);
+  const MIN_RELOAD_INTERVAL = 2000; // 2 seconds minimum between reloads (accounts for backend delay ~1.5s)
+  
   // Input values (for display only, don't trigger calculations)
   const [betAmountInput, setBetAmountInput] = useState<string>('100');
   const [refreshIntervalInput, setRefreshIntervalInput] = useState<string>(DEFAULT_REFRESH_INTERVAL.toString());
@@ -474,6 +478,9 @@ export default function ScanScreen() {
   // Actual values used for calculations (only updated when Save is pressed)
   const [betAmountForCalculation, setBetAmountForCalculation] = useState<string>('100');
   const [refreshInterval, setRefreshInterval] = useState<string>(DEFAULT_REFRESH_INTERVAL.toString());
+  
+  // Polling interval ref for smart polling based on nextRefreshSeconds
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Load stored refresh interval on mount
   useEffect(() => {
@@ -496,6 +503,7 @@ export default function ScanScreen() {
       }
       setError(null);
 
+      const startTime = Date.now();
       const response = await get<ScanResults>('/api/scan/results');
       
       if (response.error) {
@@ -503,6 +511,12 @@ export default function ScanScreen() {
         setResults(null);
       } else if (response.data) {
         setResults(response.data);
+        
+        // Log timing for debugging (includes backend delay ~1.5s)
+        const duration = Date.now() - startTime;
+        if (duration > 1000) {
+          console.log(`[Scan] Results loaded in ${duration}ms (includes backend delay)`);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch scan results');
@@ -514,19 +528,32 @@ export default function ScanScreen() {
   }, []);
 
   useEffect(() => {
+    // Clear any existing polling interval
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
     // Initial fetch
     fetchScanResults();
 
     // Set up auto-refresh with user-defined interval
+    // Account for backend delay (~1.5s) by ensuring minimum interval is reasonable
     const intervalSeconds = parseInt(refreshInterval, 10) || DEFAULT_REFRESH_INTERVAL;
-    const intervalMs = Math.max(1000, intervalSeconds * 1000); // Minimum 1 second
+    // Minimum 3 seconds to account for backend delay (1.5s) + processing time
+    const minIntervalSeconds = 3;
+    const effectiveIntervalSeconds = Math.max(minIntervalSeconds, intervalSeconds);
+    const intervalMs = effectiveIntervalSeconds * 1000;
 
-    const interval = setInterval(() => {
+    pollingIntervalRef.current = setInterval(() => {
       fetchScanResults(true);
     }, intervalMs);
 
     return () => {
-      clearInterval(interval);
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
     };
   }, [fetchScanResults, refreshInterval]);
 
@@ -539,6 +566,19 @@ export default function ScanScreen() {
   }, []);
 
   const handleRefresh = useCallback(() => {
+    const now = Date.now();
+    const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
+    
+    // Prevent rapid refresh requests (debouncing)
+    // Backend has ~1.5s delay, so minimum 2 seconds between refreshes to prevent overload
+    if (timeSinceLastRefresh < MIN_RELOAD_INTERVAL) {
+      const remaining = Math.ceil((MIN_RELOAD_INTERVAL - timeSinceLastRefresh) / 1000);
+      console.log(`[Scan] Please wait ${remaining} second(s) before refreshing again`);
+      // Prevent rapid refresh requests
+      return;
+    }
+    
+    lastRefreshTimeRef.current = now;
     fetchScanResults(true);
   }, [fetchScanResults]);
 
@@ -743,9 +783,16 @@ export default function ScanScreen() {
             </XStack>
           </XStack>
         </XStack>
-        <Text fontSize="$2" color="$colorPress" marginTop="$2">
-          Auto-refreshing every {parseInt(refreshInterval, 10) || DEFAULT_REFRESH_INTERVAL} seconds
-        </Text>
+        <XStack alignItems="center" space="$2" marginTop="$2">
+          <Text fontSize="$2" color="$colorPress">
+            Auto-refreshing every {Math.max(3, parseInt(refreshInterval, 10) || DEFAULT_REFRESH_INTERVAL)} seconds
+          </Text>
+          {refreshing && (
+            <Text fontSize="$2" color="$blue10">
+              (refreshing...)
+            </Text>
+          )}
+        </XStack>
       </YStack>
 
       <ScrollView
