@@ -78,10 +78,10 @@ export default function PlayerStatsPage() {
   const fetchPlayerStats = useCallback(async () => {
     try {
       setError(null);
-      const currentSeason = getCurrentSeason();
-      const endpoint = `/api/player-stats?season=${currentSeason}`;
+      // Fetch all players from all seasons to enable searching across entire database
+      const endpoint = `/api/player-stats`;
       
-      console.log(`[PlayerStats] Fetching stats for current season: ${currentSeason}`);
+      console.log(`[PlayerStats] Fetching stats for all players (all seasons)`);
       
       const response = await get<PlayerStats[]>(endpoint);
 
@@ -213,7 +213,7 @@ export default function PlayerStatsPage() {
                 Player Statistics
               </Text>
               <Text fontSize="$3" color="$colorPress">
-                Season {getCurrentSeason()} (Current Season)
+                All Players (All Seasons)
               </Text>
               <Separator />
               
@@ -242,7 +242,7 @@ export default function PlayerStatsPage() {
                 <Text fontSize="$4" color="$colorPress" textAlign="center">
                   {searchQuery 
                     ? 'No players found matching your search.' 
-                    : `No player stats available for season ${getCurrentSeason()}.`}
+                    : 'No player stats available.'}
                 </Text>
                 {!searchQuery && (
                   <Text fontSize="$3" color="$yellow11" textAlign="center" marginTop="$2">
