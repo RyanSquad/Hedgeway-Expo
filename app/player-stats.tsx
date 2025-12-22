@@ -79,35 +79,84 @@ export default function PlayerStatsPage() {
     try {
       setError(null);
       const currentSeason = getCurrentSeason();
-      const endpoint = `/api/player-stats?season=${currentSeason}`;
       
       console.log(`[PlayerStats] Fetching stats for current season: ${currentSeason}`);
       
-      const response = await get<PlayerStats[]>(endpoint);
-
-      console.log(`[PlayerStats] Response:`, response);
-
-      if (response.error) {
-        // Check if it's a route not found error
-        const errorMsg = response.error.toLowerCase();
-        if (errorMsg.includes('not found') || errorMsg.includes('404') || errorMsg.includes('route')) {
-          setError(
-            'API endpoint not found. The backend route GET /api/player-stats needs to be implemented. ' +
-            'Please check the backend implementation or contact an administrator.'
-          );
-        } else {
-          setError(response.error);
-        }
-        setPlayerStats([]);
-      } else if (response.data) {
-        console.log(`[PlayerStats] Received ${response.data.length} player stats`);
-        setPlayerStats(Array.isArray(response.data) ? response.data : []);
+      // Fetch all players with pagination support
+      const allPlayers: PlayerStats[] = [];
+      let offset = 0;
+      const limit = 100; // Page size
+      let hasMore = true;
+      let encounteredError = false;
+      
+      while (hasMore && !encounteredError) {
+        // Try with limit/offset first, fallback to just offset if limit not supported
+        let endpoint = `/api/player-stats?season=${currentSeason}&limit=${limit}&offset=${offset}`;
+        let response = await get<PlayerStats[]>(endpoint);
         
-        if (Array.isArray(response.data) && response.data.length === 0) {
+        // If limit/offset fails, try without limit parameter
+        if (response.error && offset === 0) {
+          endpoint = `/api/player-stats?season=${currentSeason}&offset=${offset}`;
+          response = await get<PlayerStats[]>(endpoint);
+        }
+        
+        if (response.error) {
+          // Check if it's a route not found error
+          const errorMsg = response.error.toLowerCase();
+          if (errorMsg.includes('not found') || errorMsg.includes('404') || errorMsg.includes('route')) {
+            setError(
+              'API endpoint not found. The backend route GET /api/player-stats needs to be implemented. ' +
+              'Please check the backend implementation or contact an administrator.'
+            );
+          } else {
+            // If we have some players already, use them and stop
+            if (allPlayers.length > 0) {
+              console.log(`[PlayerStats] Stopped pagination due to error, using ${allPlayers.length} players`);
+              break;
+            }
+            setError(response.error);
+          }
+          encounteredError = true;
+          break;
+        } else if (response.data) {
+          const players = Array.isArray(response.data) ? response.data : [];
+          allPlayers.push(...players);
+          
+          console.log(`[PlayerStats] Fetched ${players.length} players (total: ${allPlayers.length})`);
+          
+          // If we got fewer than the limit (or exactly 0), we've reached the end
+          // Also stop if we got exactly 100 and it's the first request (might be all there is)
+          if (players.length < limit) {
+            hasMore = false;
+          } else if (players.length === limit) {
+            // Got exactly limit, might be more - continue
+            offset += limit;
+            // Safety check: stop after reasonable number of pages (e.g., 50 pages = 5000 players)
+            if (offset >= 5000) {
+              console.log(`[PlayerStats] Reached safety limit of 5000 players`);
+              hasMore = false;
+            }
+          }
+        } else {
+          if (allPlayers.length > 0) {
+            // We have some data, use it
+            break;
+          }
+          setError('No data received from server');
+          encounteredError = true;
+          break;
+        }
+      }
+      
+      if (!encounteredError || allPlayers.length > 0) {
+        if (allPlayers.length > 0) {
+          console.log(`[PlayerStats] Received ${allPlayers.length} total player stats`);
+          setPlayerStats(allPlayers);
+          setError(null);
+        } else {
           setError(null); // Clear error, just show empty state message
         }
       } else {
-        setError('No data received from server');
         setPlayerStats([]);
       }
     } catch (err) {
