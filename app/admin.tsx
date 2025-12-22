@@ -180,7 +180,8 @@ export default function AdminPanel() {
 
   /**
    * Get current NBA season year
-   * Season year represents the calendar year in which the season ends
+   * Season year represents the calendar year in which the season begins
+   * e.g., 2023-2024 season = 2023, 2024-2025 season = 2024
    */
   const getCurrentSeason = (): number => {
     const now = new Date();
@@ -188,12 +189,13 @@ export default function AdminPanel() {
     const year = now.getFullYear();
     
     // NBA season runs October (10) to April (4)
+    // Season year is the year it BEGINS
     if (month >= 10) {
-      return year; // October-December: next year's season
+      return year; // October-December: current season started this year
     } else if (month <= 4) {
-      return year - 1; // January-April: current year's season
+      return year - 1; // January-April: current season started last year
     } else {
-      // May-September: use next season (upcoming)
+      // May-September: off-season, use last season (the one that just ended)
       return year - 1;
     }
   };
@@ -533,7 +535,7 @@ export default function AdminPanel() {
                     size="$4"
                   />
                   <Text fontSize="$2" color="$colorPress">
-                    Current season: {getCurrentSeason()} (NBA season year = calendar year season ends)
+                    Current season: {getCurrentSeason()} (NBA season year = calendar year season begins)
                   </Text>
                 </YStack>
 
