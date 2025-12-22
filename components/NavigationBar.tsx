@@ -16,6 +16,8 @@ export function NavigationBar() {
         return 'Home';
       case '/scan':
         return 'Scan Results';
+      case '/player-stats':
+        return 'Player Stats';
       case '/admin':
         return 'Admin Panel';
       default:
