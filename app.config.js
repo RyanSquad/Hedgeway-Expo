@@ -27,7 +27,7 @@ export default {
       package: 'com.hedgeway.expo',
     },
     web: {
-      // favicon: './assets/favicon.png', // Optional - will use default if not provided
+      favicon: './assets/favicon.png',
     },
     scheme: 'hedgeway',
     plugins: [
