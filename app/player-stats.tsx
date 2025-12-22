@@ -1,5 +1,23 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import { YStack, XStack, Text, ScrollView, Spinner, Card, Separator, Input, Label } from 'tamagui';
+/**
+ * Player Stats Page with Pagination
+ * 
+ * Features:
+ * - Displays 50 players per page
+ * - Search functionality searches ALL players in the season (backend-side)
+ * - Pagination controls for navigating through pages
+ * 
+ * Backend API Requirements:
+ * The backend endpoint GET /api/player-stats should support:
+ * - Query params: season (required), page (optional), limit (optional), search (optional)
+ * - Response format: { data: PlayerStats[], pagination: PaginationInfo }
+ * - When search is provided, return all matching players (not paginated)
+ * - When page/limit provided, return paginated results with pagination metadata
+ * 
+ * See IMPLEMENTATION_GUIDES/PLAYER_STATS_PAGINATION_IMPLEMENTATION.md for full details
+ */
+
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { YStack, XStack, Text, ScrollView, Spinner, Card, Separator, Input, Label, Button } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
 import { RefreshControl } from 'react-native';
 import { get } from '../lib/api';
@@ -46,6 +64,20 @@ interface PlayerStats {
   last_updated: string;
 }
 
+interface PaginationInfo {
+  currentPage: number;
+  totalPages: number;
+  totalPlayers: number;
+  limit: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+}
+
+interface PlayerStatsResponse {
+  data: PlayerStats[];
+  pagination: PaginationInfo;
+}
+
 /**
  * Get current NBA season year
  * Season year represents the calendar year in which the season begins
@@ -74,134 +106,147 @@ export default function PlayerStatsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [paginationInfo, setPaginationInfo] = useState<PaginationInfo | null>(null);
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  
+  const PLAYERS_PER_PAGE = 50;
+  const searchInputRef = useRef<string>('');
 
-  const fetchPlayerStats = useCallback(async () => {
+  const fetchPlayerStats = useCallback(async (page: number = 1, search: string = '') => {
     try {
       setError(null);
+      setLoading(true);
       const currentSeason = getCurrentSeason();
       
-      console.log(`[PlayerStats] Fetching stats for current season: ${currentSeason}`);
+      // Build endpoint with pagination or search
+      let endpoint = `/api/player-stats?season=${currentSeason}`;
       
-      // Fetch all players with pagination support
-      const allPlayers: PlayerStats[] = [];
-      let offset = 0;
-      const limit = 100; // Page size
-      let hasMore = true;
-      let encounteredError = false;
-      
-      while (hasMore && !encounteredError) {
-        // Try with limit/offset first, fallback to just offset if limit not supported
-        let endpoint = `/api/player-stats?season=${currentSeason}&limit=${limit}&offset=${offset}`;
-        let response = await get<PlayerStats[]>(endpoint);
-        
-        // If limit/offset fails, try without limit parameter
-        if (response.error && offset === 0) {
-          endpoint = `/api/player-stats?season=${currentSeason}&offset=${offset}`;
-          response = await get<PlayerStats[]>(endpoint);
-        }
-        
-        if (response.error) {
-          // Check if it's a route not found error
-          const errorMsg = response.error.toLowerCase();
-          if (errorMsg.includes('not found') || errorMsg.includes('404') || errorMsg.includes('route')) {
-            setError(
-              'API endpoint not found. The backend route GET /api/player-stats needs to be implemented. ' +
-              'Please check the backend implementation or contact an administrator.'
-            );
-          } else {
-            // If we have some players already, use them and stop
-            if (allPlayers.length > 0) {
-              console.log(`[PlayerStats] Stopped pagination due to error, using ${allPlayers.length} players`);
-              break;
-            }
-            setError(response.error);
-          }
-          encounteredError = true;
-          break;
-        } else if (response.data) {
-          const players = Array.isArray(response.data) ? response.data : [];
-          allPlayers.push(...players);
-          
-          console.log(`[PlayerStats] Fetched ${players.length} players (total: ${allPlayers.length})`);
-          
-          // If we got fewer than the limit (or exactly 0), we've reached the end
-          // Also stop if we got exactly 100 and it's the first request (might be all there is)
-          if (players.length < limit) {
-            hasMore = false;
-          } else if (players.length === limit) {
-            // Got exactly limit, might be more - continue
-            offset += limit;
-            // Safety check: stop after reasonable number of pages (e.g., 50 pages = 5000 players)
-            if (offset >= 5000) {
-              console.log(`[PlayerStats] Reached safety limit of 5000 players`);
-              hasMore = false;
-            }
-          }
-        } else {
-          if (allPlayers.length > 0) {
-            // We have some data, use it
-            break;
-          }
-          setError('No data received from server');
-          encounteredError = true;
-          break;
-        }
+      if (search.trim()) {
+        // Search mode: fetch all matching players
+        endpoint += `&search=${encodeURIComponent(search.trim())}`;
+        setIsSearchMode(true);
+      } else {
+        // Pagination mode: fetch specific page
+        endpoint += `&page=${page}&limit=${PLAYERS_PER_PAGE}`;
+        setIsSearchMode(false);
       }
       
-      if (!encounteredError || allPlayers.length > 0) {
-        if (allPlayers.length > 0) {
-          console.log(`[PlayerStats] Received ${allPlayers.length} total player stats`);
-          setPlayerStats(allPlayers);
-          setError(null);
+      console.log(`[PlayerStats] Fetching: ${endpoint}`);
+      
+      // Use any type to handle both legacy array and new paginated response
+      const response = await get<PlayerStatsResponse | PlayerStats[]>(endpoint);
+      
+      if (response.error) {
+        const errorMsg = response.error.toLowerCase();
+        if (errorMsg.includes('not found') || errorMsg.includes('404') || errorMsg.includes('route')) {
+          setError(
+            'API endpoint not found. The backend route GET /api/player-stats needs to be implemented. ' +
+            'Please check the backend implementation or contact an administrator.'
+          );
         } else {
+          setError(response.error);
+        }
+        setPlayerStats([]);
+        setPaginationInfo(null);
+      } else if (response.data) {
+        // Handle both new paginated response and legacy array response
+        let players: PlayerStats[] = [];
+        let pagination: PaginationInfo | null = null;
+        
+        if (Array.isArray(response.data)) {
+          // Legacy response format (array directly)
+          players = response.data;
+        } else if ('data' in response.data && Array.isArray(response.data.data)) {
+          // New paginated response format: { data: PlayerStats[], pagination: PaginationInfo }
+          players = response.data.data;
+          if (response.data.pagination && 'currentPage' in response.data.pagination) {
+            pagination = response.data.pagination as PaginationInfo;
+          }
+        } else {
+          players = [];
+        }
+        
+        setPlayerStats(players);
+        setPaginationInfo(pagination);
+        
+        if (players.length === 0) {
           setError(null); // Clear error, just show empty state message
         }
       } else {
+        setError('No data received from server');
         setPlayerStats([]);
+        setPaginationInfo(null);
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to fetch player stats';
       console.error('[PlayerStats] Error fetching stats:', err);
       setError(errorMsg);
       setPlayerStats([]);
+      setPaginationInfo(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
+  }, [PLAYERS_PER_PAGE]);
+
+  // Memoize player count text to prevent recalculation on every render
+  const playerCountText = useMemo(() => {
+    if (isSearchMode) {
+      return `${playerStats.length} player${playerStats.length !== 1 ? 's' : ''} found`;
+    } else if (paginationInfo) {
+      return `Showing ${((currentPage - 1) * PLAYERS_PER_PAGE) + 1}-${Math.min(currentPage * PLAYERS_PER_PAGE, paginationInfo.totalPlayers)} of ${paginationInfo.totalPlayers} players`;
+    } else {
+      return `${playerStats.length} players`;
+    }
+  }, [isSearchMode, playerStats.length, paginationInfo, currentPage, PLAYERS_PER_PAGE]);
+
+  // Handle input change - only update ref, no state update to prevent re-renders
+  // State will be synced only when search is triggered or input is cleared
+  const handleInputChange = useCallback((text: string) => {
+    searchInputRef.current = text;
+    // Don't update state - this prevents re-renders and input delay
+    // The input will still work because we're using defaultValue with key
   }, []);
 
-  useEffect(() => {
-    fetchPlayerStats();
+  // Handle manual search trigger (button click or Enter key)
+  const handleSearch = useCallback(() => {
+    const trimmedQuery = searchInputRef.current.trim();
+    
+    // Sync ref value to state for display consistency
+    setSearchQuery(searchInputRef.current);
+    
+    if (trimmedQuery) {
+      // Search mode: fetch all matching players
+      setCurrentPage(1); // Reset to first page when searching
+      fetchPlayerStats(1, trimmedQuery);
+    } else {
+      // Clear search: return to pagination mode
+      setCurrentPage(1);
+      searchInputRef.current = '';
+      setSearchQuery('');
+      fetchPlayerStats(1, '');
+    }
   }, [fetchPlayerStats]);
+
+  // Initial load
+  useEffect(() => {
+    fetchPlayerStats(currentPage, searchQuery);
+  }, []); // Only run on mount
+
+  // Handle page changes (only in pagination mode)
+  useEffect(() => {
+    if (!isSearchMode) {
+      fetchPlayerStats(currentPage, '');
+    }
+  }, [currentPage, isSearchMode, fetchPlayerStats]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchPlayerStats();
-  }, [fetchPlayerStats]);
-
-  // Filter players by search query
-  const filteredStats = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return playerStats;
-    }
-
-    const query = searchQuery.toLowerCase().trim();
-    return playerStats.filter((stat) => {
-      const fullName = `${stat.player_first_name} ${stat.player_last_name}`.toLowerCase();
-      const firstName = stat.player_first_name?.toLowerCase() || '';
-      const lastName = stat.player_last_name?.toLowerCase() || '';
-      const team = stat.team_abbreviation?.toLowerCase() || '';
-      const position = stat.player_position?.toLowerCase() || '';
-
-      return (
-        fullName.includes(query) ||
-        firstName.includes(query) ||
-        lastName.includes(query) ||
-        team.includes(query) ||
-        position.includes(query)
-      );
-    });
-  }, [playerStats, searchQuery]);
+    fetchPlayerStats(currentPage, searchQuery);
+  }, [fetchPlayerStats, currentPage, searchQuery]);
 
   const formatStat = (value: number | string | null | undefined): string => {
     if (value === null || value === undefined) return 'N/A';
@@ -223,6 +268,112 @@ export default function PlayerStatsPage() {
     } catch {
       return dateString;
     }
+  };
+
+  // Pagination Controls Component
+  const PaginationControls = () => {
+    if (!paginationInfo || isSearchMode) {
+      return null; // Don't show pagination in search mode
+    }
+    
+    const { currentPage: page, totalPages, hasNextPage, hasPreviousPage, totalPlayers } = paginationInfo;
+    
+    const handlePageChange = (newPage: number) => {
+      if (newPage >= 1 && newPage <= totalPages) {
+        setCurrentPage(newPage);
+      }
+    };
+    
+    // Calculate page numbers to display
+    const getPageNumbers = () => {
+      const pages: (number | string)[] = [];
+      const maxVisible = 5;
+      
+      if (totalPages <= maxVisible) {
+        // Show all pages if total is small
+        for (let i = 1; i <= totalPages; i++) {
+          pages.push(i);
+        }
+      } else {
+        // Show first page
+        pages.push(1);
+        
+        if (page > 3) {
+          pages.push('...');
+        }
+        
+        // Show pages around current page
+        const start = Math.max(2, page - 1);
+        const end = Math.min(totalPages - 1, page + 1);
+        
+        for (let i = start; i <= end; i++) {
+          pages.push(i);
+        }
+        
+        if (page < totalPages - 2) {
+          pages.push('...');
+        }
+        
+        // Show last page
+        pages.push(totalPages);
+      }
+      
+      return pages;
+    };
+    
+    return (
+      <Card elevate padding="$3" backgroundColor="$backgroundStrong" marginTop="$4">
+        <XStack space="$3" alignItems="center" justifyContent="center" flexWrap="wrap">
+          <Button
+            size="$3"
+            disabled={!hasPreviousPage}
+            onPress={() => handlePageChange(page - 1)}
+            opacity={hasPreviousPage ? 1 : 0.5}
+          >
+            Previous
+          </Button>
+          
+          {getPageNumbers().map((pageNum, index) => {
+            if (pageNum === '...') {
+              return (
+                <Text key={`ellipsis-${index}`} fontSize="$4" color="$colorPress" paddingHorizontal="$2">
+                  ...
+                </Text>
+              );
+            }
+            
+            const isCurrentPage = pageNum === page;
+            
+            return (
+              <Button
+                key={pageNum}
+                size="$3"
+                variant="outlined"
+                backgroundColor={isCurrentPage ? '$blue5' : 'transparent'}
+                onPress={() => handlePageChange(pageNum as number)}
+              >
+                <Text color={isCurrentPage ? '$color' : '$colorPress'}>
+                  {pageNum}
+                </Text>
+              </Button>
+            );
+          })}
+          
+          <Button
+            size="$3"
+            disabled={!hasNextPage}
+            onPress={() => handlePageChange(page + 1)}
+            opacity={hasNextPage ? 1 : 0.5}
+          >
+            Next
+          </Button>
+        </XStack>
+        
+        <Text fontSize="$2" color="$colorPress" textAlign="center" marginTop="$2">
+          Page {page} of {totalPages} ({totalPlayers} total players)
+        </Text>
+      </Card>
+    );
   };
 
   if (loading) {
@@ -270,22 +421,37 @@ export default function PlayerStatsPage() {
                 <Label fontSize="$4" color="$colorPress">
                   Search Players
                 </Label>
-                <Input
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  placeholder="Search by name, team, or position..."
-                  size="$4"
-                  backgroundColor="$background"
-                />
+                <XStack space="$2" alignItems="center">
+                  <Input
+                    key={`search-input-${searchQuery === '' ? 'empty' : 'filled'}`}
+                    flex={1}
+                    defaultValue={searchQuery}
+                    onChangeText={handleInputChange}
+                    onSubmitEditing={handleSearch}
+                    returnKeyType="search"
+                    placeholder="Search by name, team, or position..."
+                    size="$4"
+                    backgroundColor="$background"
+                  />
+                  <Button
+                    size="$4"
+                    onPress={handleSearch}
+                    backgroundColor="$blue9"
+                    color="white"
+                    fontWeight="bold"
+                  >
+                    Search
+                  </Button>
+                </XStack>
                 <Text fontSize="$2" color="$colorPress">
-                  {filteredStats.length} of {playerStats.length} players
+                  {playerCountText}
                 </Text>
               </YStack>
             </YStack>
           </Card>
 
           {/* Stats Table */}
-          {filteredStats.length === 0 && !error ? (
+          {playerStats.length === 0 && !error ? (
             <Card elevate padding="$4" backgroundColor="$backgroundStrong">
               <YStack space="$2" alignItems="center">
                 <Text fontSize="$4" color="$colorPress" textAlign="center">
@@ -300,7 +466,7 @@ export default function PlayerStatsPage() {
                 )}
               </YStack>
             </Card>
-          ) : filteredStats.length > 0 ? (
+          ) : playerStats.length > 0 ? (
             <Card elevate padding="$4" backgroundColor="$backgroundStrong">
               <ScrollView horizontal showsHorizontalScrollIndicator={true}>
                 <YStack space="$2" minWidth={1600}>
@@ -406,7 +572,7 @@ export default function PlayerStatsPage() {
                   </XStack>
 
                   {/* Table Rows */}
-                  {filteredStats.map((stat, index) => (
+                  {playerStats.map((stat, index) => (
                     <XStack
                       key={stat.id}
                       paddingVertical="$3"
@@ -512,6 +678,9 @@ export default function PlayerStatsPage() {
               </ScrollView>
             </Card>
           ) : null}
+
+          {/* Pagination Controls */}
+          {!isSearchMode && <PaginationControls />}
         </YStack>
       </ScrollView>
 
