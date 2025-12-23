@@ -19,7 +19,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { YStack, XStack, Text, ScrollView, Spinner, Card, Separator, Input, Label, Button } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
-import { RefreshControl } from 'react-native';
+import { RefreshControl, Pressable, Platform } from 'react-native';
 import { get } from '../lib/api';
 import { NavigationBar } from '../components/NavigationBar';
 
@@ -37,26 +37,31 @@ interface PlayerStats {
   last_game_rebounds: number | null;
   last_game_steals: number | null;
   last_game_blocks: number | null;
+  last_game_fg3_made: number | null;
   avg_7_points: number | null;
   avg_7_assists: number | null;
   avg_7_rebounds: number | null;
   avg_7_steals: number | null;
   avg_7_blocks: number | null;
+  avg_7_fg3_made: number | null;
   avg_14_points: number | null;
   avg_14_assists: number | null;
   avg_14_rebounds: number | null;
   avg_14_steals: number | null;
   avg_14_blocks: number | null;
+  avg_14_fg3_made: number | null;
   avg_30_points: number | null;
   avg_30_assists: number | null;
   avg_30_rebounds: number | null;
   avg_30_steals: number | null;
   avg_30_blocks: number | null;
+  avg_30_fg3_made: number | null;
   season_avg_points: number | null;
   season_avg_assists: number | null;
   season_avg_rebounds: number | null;
   season_avg_steals: number | null;
   season_avg_blocks: number | null;
+  season_avg_fg3_made: number | null;
   season_games_played: number;
   games_played_7: number;
   games_played_14: number;
@@ -112,10 +117,18 @@ export default function PlayerStatsPage() {
   const [paginationInfo, setPaginationInfo] = useState<PaginationInfo | null>(null);
   const [isSearchMode, setIsSearchMode] = useState(false);
   
+  // Sorting state
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [renderKey, setRenderKey] = useState(0); // Force re-render key
+  
   const PLAYERS_PER_PAGE = 50;
   const searchInputRef = useRef<string>('');
+  const isSortChangingRef = useRef(false);
+  const sortColumnRef = useRef<string | null>(null);
+  const sortDirectionRef = useRef<'asc' | 'desc'>('asc');
 
-  const fetchPlayerStats = useCallback(async (page: number = 1, search: string = '') => {
+  const fetchPlayerStats = useCallback(async (page: number = 1, search: string = '', sortBy: string | null = null, sortOrder: 'asc' | 'desc' = 'asc') => {
     try {
       setError(null);
       setLoading(true);
@@ -134,7 +147,10 @@ export default function PlayerStatsPage() {
         setIsSearchMode(false);
       }
       
-      console.log(`[PlayerStats] Fetching: ${endpoint}`);
+      // Add sorting parameters if provided
+      if (sortBy) {
+        endpoint += `&sortBy=${encodeURIComponent(sortBy)}&sortOrder=${sortOrder}`;
+      }
       
       // Use any type to handle both legacy array and new paginated response
       const response = await get<PlayerStatsResponse | PlayerStats[]>(endpoint);
@@ -169,8 +185,11 @@ export default function PlayerStatsPage() {
           players = [];
         }
         
-        setPlayerStats(players);
+        // Ensure we create a new array reference so React detects the change
+        setPlayerStats([...players]);
         setPaginationInfo(pagination);
+        // Force re-render by updating render key
+        setRenderKey(prev => prev + 1);
         
         if (players.length === 0) {
           setError(null); // Clear error, just show empty state message
@@ -221,32 +240,40 @@ export default function PlayerStatsPage() {
     if (trimmedQuery) {
       // Search mode: fetch all matching players
       setCurrentPage(1); // Reset to first page when searching
-      fetchPlayerStats(1, trimmedQuery);
+      fetchPlayerStats(1, trimmedQuery, sortColumn, sortDirection);
     } else {
       // Clear search: return to pagination mode
       setCurrentPage(1);
       searchInputRef.current = '';
       setSearchQuery('');
-      fetchPlayerStats(1, '');
+      fetchPlayerStats(1, '', sortColumn, sortDirection);
     }
-  }, [fetchPlayerStats]);
+  }, [fetchPlayerStats, sortColumn, sortDirection]);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    sortColumnRef.current = sortColumn;
+    sortDirectionRef.current = sortDirection;
+  }, [sortColumn, sortDirection]);
 
   // Initial load
   useEffect(() => {
-    fetchPlayerStats(currentPage, searchQuery);
+    fetchPlayerStats(currentPage, searchQuery, sortColumn, sortDirection);
   }, []); // Only run on mount
 
-  // Handle page changes (only in pagination mode)
+  // Handle page changes (only in pagination mode, skip if sort is changing)
+  // Note: sortColumn and sortDirection are NOT in dependencies - sort changes are handled in handleSort
   useEffect(() => {
-    if (!isSearchMode) {
-      fetchPlayerStats(currentPage, '');
+    if (!isSearchMode && !isSortChangingRef.current) {
+      // Use current sortColumn and sortDirection from refs (always up-to-date)
+      fetchPlayerStats(currentPage, '', sortColumnRef.current, sortDirectionRef.current);
     }
-  }, [currentPage, isSearchMode, fetchPlayerStats]);
+  }, [currentPage, isSearchMode, fetchPlayerStats]); // Removed sortColumn/sortDirection to prevent interference
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchPlayerStats(currentPage, searchQuery);
-  }, [fetchPlayerStats, currentPage, searchQuery]);
+    fetchPlayerStats(currentPage, searchQuery, sortColumn, sortDirection);
+  }, [fetchPlayerStats, currentPage, searchQuery, sortColumn, sortDirection]);
 
   const formatStat = (value: number | string | null | undefined): string => {
     if (value === null || value === undefined) return 'N/A';
@@ -268,6 +295,87 @@ export default function PlayerStatsPage() {
     } catch {
       return dateString;
     }
+  };
+
+  // Handle column header click for sorting
+  const handleSort = useCallback((column: string) => {
+    let newDirection: 'asc' | 'desc' = 'asc';
+    
+    if (sortColumn === column) {
+      // Toggle direction if clicking the same column
+      newDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+    }
+    
+    // Update refs immediately
+    sortColumnRef.current = column;
+    sortDirectionRef.current = newDirection;
+    
+    // Set flag to prevent page change useEffect from interfering
+    isSortChangingRef.current = true;
+    
+    // Update state
+    setSortColumn(column);
+    setSortDirection(newDirection);
+    setCurrentPage(1);
+    
+    // Fetch data directly with new sort parameters (use the new values, not state)
+    const targetPage = 1;
+    
+    if (isSearchMode) {
+      fetchPlayerStats(targetPage, searchQuery, column, newDirection);
+    } else {
+      fetchPlayerStats(targetPage, '', column, newDirection);
+    }
+    
+    // Reset flag after state updates have been processed
+    setTimeout(() => {
+      isSortChangingRef.current = false;
+    }, 100);
+  }, [sortColumn, sortDirection, searchQuery, isSearchMode, fetchPlayerStats]);
+
+  // Get sort value for a player stat based on column
+
+  // Sortable Header Component
+  const SortableHeader = ({ 
+    column, 
+    label, 
+    width, 
+    textAlign = 'left' as 'left' | 'right' | 'center' 
+  }: { 
+    column: string; 
+    label: string; 
+    width: number; 
+    textAlign?: 'left' | 'right' | 'center';
+  }) => {
+    const isSorted = sortColumn === column;
+    const isAsc = sortDirection === 'asc';
+    
+    const headerContent = (
+      <XStack
+        width={width}
+        alignItems={textAlign === 'right' ? 'flex-end' : textAlign === 'center' ? 'center' : 'flex-start'}
+        space="$1"
+        paddingHorizontal="$1"
+      >
+        <Text fontSize="$3" fontWeight="bold" color="$color" textAlign={textAlign}>
+          {label}
+        </Text>
+        {isSorted && (
+          <Text fontSize="$2" color="$blue9">
+            {isAsc ? '↑' : '↓'}
+          </Text>
+        )}
+      </XStack>
+    );
+
+    return (
+      <Pressable
+        onPress={() => handleSort(column)}
+        style={Platform.OS === 'web' ? { cursor: 'pointer' } : undefined}
+      >
+        {headerContent}
+      </Pressable>
+    );
   };
 
   // Pagination Controls Component
@@ -469,7 +577,11 @@ export default function PlayerStatsPage() {
           ) : playerStats.length > 0 ? (
             <Card elevate padding="$4" backgroundColor="$backgroundStrong">
               <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                <YStack space="$2" minWidth={1600}>
+                <YStack 
+                  key={`table-${sortColumn || 'none'}-${sortDirection || 'none'}-${renderKey}`}
+                  space="$2" 
+                  minWidth={2000}
+                >
                   {/* Table Header */}
                   <XStack
                     paddingVertical="$2"
@@ -479,102 +591,47 @@ export default function PlayerStatsPage() {
                     borderBottomWidth={1}
                     borderBottomColor="$borderColor"
                   >
-                    <Text width={180} fontSize="$3" fontWeight="bold" color="$color">
-                      Player
-                    </Text>
-                    <Text width={60} fontSize="$3" fontWeight="bold" color="$color">
-                      Team
-                    </Text>
-                    <Text width={60} fontSize="$3" fontWeight="bold" color="$color">
-                      Pos
-                    </Text>
-                    <Text width={100} fontSize="$3" fontWeight="bold" color="$color">
-                      Last Game
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Last Pts
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Last Ast
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Last Reb
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Last Stl
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Last Blk
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 7 Pts
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 7 Ast
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 7 Reb
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 7 Stl
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 7 Blk
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 14 Pts
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 14 Ast
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 14 Reb
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 14 Stl
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 14 Blk
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 30 Pts
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 30 Ast
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 30 Reb
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 30 Stl
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Avg 30 Blk
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Season Pts
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Season Ast
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Season Reb
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Season Stl
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Season Blk
-                    </Text>
-                    <Text width={80} fontSize="$3" fontWeight="bold" color="$color" textAlign="right">
-                      Games
-                    </Text>
+                    <SortableHeader column="player" label="Player" width={180} />
+                    <SortableHeader column="team" label="Team" width={60} />
+                    <SortableHeader column="position" label="Pos" width={60} />
+                    <SortableHeader column="last_game_date" label="Last Game" width={100} />
+                    <SortableHeader column="last_game_points" label="Last Pts" width={80} textAlign="right" />
+                    <SortableHeader column="last_game_assists" label="Last Ast" width={80} textAlign="right" />
+                    <SortableHeader column="last_game_rebounds" label="Last Reb" width={80} textAlign="right" />
+                    <SortableHeader column="last_game_steals" label="Last Stl" width={80} textAlign="right" />
+                    <SortableHeader column="last_game_blocks" label="Last Blk" width={80} textAlign="right" />
+                    <SortableHeader column="last_game_fg3_made" label="Last 3PM" width={80} textAlign="right" />
+                    <SortableHeader column="avg_7_points" label="Avg 7 Pts" width={80} textAlign="right" />
+                    <SortableHeader column="avg_7_assists" label="Avg 7 Ast" width={80} textAlign="right" />
+                    <SortableHeader column="avg_7_rebounds" label="Avg 7 Reb" width={80} textAlign="right" />
+                    <SortableHeader column="avg_7_steals" label="Avg 7 Stl" width={80} textAlign="right" />
+                    <SortableHeader column="avg_7_blocks" label="Avg 7 Blk" width={80} textAlign="right" />
+                    <SortableHeader column="avg_7_fg3_made" label="Avg 7 3PM" width={80} textAlign="right" />
+                    <SortableHeader column="avg_14_points" label="Avg 14 Pts" width={80} textAlign="right" />
+                    <SortableHeader column="avg_14_assists" label="Avg 14 Ast" width={80} textAlign="right" />
+                    <SortableHeader column="avg_14_rebounds" label="Avg 14 Reb" width={80} textAlign="right" />
+                    <SortableHeader column="avg_14_steals" label="Avg 14 Stl" width={80} textAlign="right" />
+                    <SortableHeader column="avg_14_blocks" label="Avg 14 Blk" width={80} textAlign="right" />
+                    <SortableHeader column="avg_14_fg3_made" label="Avg 14 3PM" width={80} textAlign="right" />
+                    <SortableHeader column="avg_30_points" label="Avg 30 Pts" width={80} textAlign="right" />
+                    <SortableHeader column="avg_30_assists" label="Avg 30 Ast" width={80} textAlign="right" />
+                    <SortableHeader column="avg_30_rebounds" label="Avg 30 Reb" width={80} textAlign="right" />
+                    <SortableHeader column="avg_30_steals" label="Avg 30 Stl" width={80} textAlign="right" />
+                    <SortableHeader column="avg_30_blocks" label="Avg 30 Blk" width={80} textAlign="right" />
+                    <SortableHeader column="avg_30_fg3_made" label="Avg 30 3PM" width={80} textAlign="right" />
+                    <SortableHeader column="season_avg_points" label="Season Pts" width={80} textAlign="right" />
+                    <SortableHeader column="season_avg_assists" label="Season Ast" width={80} textAlign="right" />
+                    <SortableHeader column="season_avg_rebounds" label="Season Reb" width={80} textAlign="right" />
+                    <SortableHeader column="season_avg_steals" label="Season Stl" width={80} textAlign="right" />
+                    <SortableHeader column="season_avg_blocks" label="Season Blk" width={80} textAlign="right" />
+                    <SortableHeader column="season_avg_fg3_made" label="Season 3PM" width={80} textAlign="right" />
+                    <SortableHeader column="season_games_played" label="Games" width={80} textAlign="right" />
                   </XStack>
 
                   {/* Table Rows */}
                   {playerStats.map((stat, index) => (
                     <XStack
-                      key={stat.id}
+                      key={`${stat.id}-${sortColumn || 'none'}-${sortDirection || 'none'}-${renderKey}`}
                       paddingVertical="$3"
                       paddingHorizontal="$3"
                       backgroundColor={index % 2 === 0 ? '$background' : '$backgroundStrong'}
@@ -610,6 +667,9 @@ export default function PlayerStatsPage() {
                         {formatStat(stat.last_game_blocks)}
                       </Text>
                       <Text width={80} fontSize="$3" color="$color" textAlign="right">
+                        {formatStat(stat.last_game_fg3_made)}
+                      </Text>
+                      <Text width={80} fontSize="$3" color="$color" textAlign="right">
                         {formatStat(stat.avg_7_points)}
                       </Text>
                       <Text width={80} fontSize="$3" color="$color" textAlign="right">
@@ -623,6 +683,9 @@ export default function PlayerStatsPage() {
                       </Text>
                       <Text width={80} fontSize="$3" color="$color" textAlign="right">
                         {formatStat(stat.avg_7_blocks)}
+                      </Text>
+                      <Text width={80} fontSize="$3" color="$color" textAlign="right">
+                        {formatStat(stat.avg_7_fg3_made)}
                       </Text>
                       <Text width={80} fontSize="$3" color="$color" textAlign="right">
                         {formatStat(stat.avg_14_points)}
@@ -640,6 +703,9 @@ export default function PlayerStatsPage() {
                         {formatStat(stat.avg_14_blocks)}
                       </Text>
                       <Text width={80} fontSize="$3" color="$color" textAlign="right">
+                        {formatStat(stat.avg_14_fg3_made)}
+                      </Text>
+                      <Text width={80} fontSize="$3" color="$color" textAlign="right">
                         {formatStat(stat.avg_30_points)}
                       </Text>
                       <Text width={80} fontSize="$3" color="$color" textAlign="right">
@@ -655,6 +721,9 @@ export default function PlayerStatsPage() {
                         {formatStat(stat.avg_30_blocks)}
                       </Text>
                       <Text width={80} fontSize="$3" color="$color" textAlign="right">
+                        {formatStat(stat.avg_30_fg3_made)}
+                      </Text>
+                      <Text width={80} fontSize="$3" color="$color" textAlign="right">
                         {formatStat(stat.season_avg_points)}
                       </Text>
                       <Text width={80} fontSize="$3" color="$color" textAlign="right">
@@ -668,6 +737,9 @@ export default function PlayerStatsPage() {
                       </Text>
                       <Text width={80} fontSize="$3" color="$color" textAlign="right">
                         {formatStat(stat.season_avg_blocks)}
+                      </Text>
+                      <Text width={80} fontSize="$3" color="$color" textAlign="right">
+                        {formatStat(stat.season_avg_fg3_made)}
                       </Text>
                       <Text width={80} fontSize="$3" color="$color" textAlign="right">
                         {stat.season_games_played}
