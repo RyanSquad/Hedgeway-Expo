@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { YStack, XStack, Text, Button, Input, Card, Spinner } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -41,6 +41,8 @@ export default function HomeScreen() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const passwordInputRef = useRef<any>(null);
+  const confirmPasswordInputRef = useRef<any>(null);
 
   const handleSubmit = async () => {
     // Prevent multiple simultaneous requests
@@ -313,6 +315,20 @@ export default function HomeScreen() {
                 size="$4"
                 borderColor="$borderColor"
                 backgroundColor="$background"
+                returnKeyType="next"
+                onSubmitEditing={() => {
+                  if (isLogin) {
+                    // In login mode, focus password or submit if password is already filled
+                    if (password) {
+                      handleSubmit();
+                    } else {
+                      passwordInputRef.current?.focus();
+                    }
+                  } else {
+                    // In register mode, always focus password
+                    passwordInputRef.current?.focus();
+                  }
+                }}
               />
             </YStack>
 
@@ -321,6 +337,7 @@ export default function HomeScreen() {
                 Password
               </Text>
               <Input
+                ref={passwordInputRef}
                 placeholder="Enter your password"
                 value={password}
                 onChangeText={setPassword}
@@ -328,6 +345,16 @@ export default function HomeScreen() {
                 size="$4"
                 borderColor="$borderColor"
                 backgroundColor="$background"
+                returnKeyType={isLogin ? "done" : "next"}
+                onSubmitEditing={() => {
+                  if (isLogin) {
+                    // In login mode, submit the form
+                    handleSubmit();
+                  } else {
+                    // In register mode, focus confirm password
+                    confirmPasswordInputRef.current?.focus();
+                  }
+                }}
               />
             </YStack>
 
@@ -337,6 +364,7 @@ export default function HomeScreen() {
                   Confirm Password
                 </Text>
                 <Input
+                  ref={confirmPasswordInputRef}
                   placeholder="Confirm your password"
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
@@ -344,6 +372,8 @@ export default function HomeScreen() {
                   size="$4"
                   borderColor="$borderColor"
                   backgroundColor="$background"
+                  returnKeyType="done"
+                  onSubmitEditing={handleSubmit}
                 />
               </YStack>
             )}
