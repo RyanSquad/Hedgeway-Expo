@@ -22,6 +22,7 @@ interface ArbOpportunity {
     vendor: string;
   };
   timestamp: number;
+  isLiveOrFinished?: boolean; // Optional: backend-provided flag (preferred)
 }
 
 interface ScanResults {
@@ -30,6 +31,8 @@ interface ScanResults {
   playerNameMap: Record<string, string>;
   gameTimeMap: Record<string, string>;
   gameStatusMap: Record<string, string>;
+  gamePhaseMap?: Record<string, 'pre' | 'live' | 'final' | 'unknown'>; // Optional: backend-provided phase
+  isLiveOrFinishedMap?: Record<string, boolean>; // Optional: backend-provided flag (preferred)
   date: string | null;
   timestamp: number | null;
   nextRefreshSeconds: number;
@@ -165,6 +168,51 @@ interface ProcessedArb extends ArbOpportunity {
   edge: string;
   propTypeDisplay: string;
   key: string;
+}
+
+/**
+ * Determine if a game status string represents a live or finished game.
+ * 
+ * @deprecated This is a fallback function for backwards compatibility.
+ * Prefer using backend-provided `isLiveOrFinished` flag on arb or `isLiveOrFinishedMap` from results.
+ */
+function isLiveOrFinishedStatus(status: string | undefined | null): boolean {
+  if (!status) return false;
+  
+  const normalized = status.trim().toLowerCase();
+  if (!normalized) return false;
+
+  // Keywords that typically indicate a game is in progress
+  const liveKeywords = [
+    'qtr',
+    'quarter',
+    '1st',
+    '2nd',
+    '3rd',
+    '4th',
+    'ot',
+    'overtime',
+    'half',
+    'halftime',
+    'live',
+    'in progress',
+    'in-progress',
+  ];
+
+  // Keywords that typically indicate a game is finished
+  const finishedKeywords = [
+    'final',
+    'end',
+    'finished',
+    'complete',
+    'full time',
+    'full-time',
+    'ft',
+  ];
+
+  return [...liveKeywords, ...finishedKeywords].some((keyword) =>
+    normalized.includes(keyword)
+  );
 }
 
 // Format game time as MM/DD with time and timezone
@@ -624,16 +672,29 @@ export default function ScanScreen() {
   const arbs = results?.arbs || [];
   
   // Filter out in-progress or finished games if toggle is enabled
+  // Uses backend-provided flags when available, falls back to heuristic parsing for backwards compatibility
   const filteredArbs = useMemo(() => {
     if (hideInProgressGames) {
       return arbs.filter((arb) => {
-        const gameStatus = results?.gameStatusMap[arb.gameId.toString()];
-        // If gameStatus exists and is not empty, the game is in progress or finished
-        return !gameStatus || gameStatus.trim() === '';
+        const gameId = arb.gameId.toString();
+        
+        // Priority 1: Use per-arb flag if available (Option B from backend improvements)
+        if (typeof arb.isLiveOrFinished === 'boolean') {
+          return !arb.isLiveOrFinished;
+        }
+        
+        // Priority 2: Use isLiveOrFinishedMap if available (Option A from backend improvements)
+        if (results?.isLiveOrFinishedMap && typeof results.isLiveOrFinishedMap[gameId] === 'boolean') {
+          return !results.isLiveOrFinishedMap[gameId];
+        }
+        
+        // Priority 3: Fallback to heuristic parsing for backwards compatibility
+        const gameStatus = results?.gameStatusMap[gameId];
+        return !isLiveOrFinishedStatus(gameStatus);
       });
     }
     return arbs;
-  }, [arbs, hideInProgressGames, results?.gameStatusMap]);
+  }, [arbs, hideInProgressGames, results?.isLiveOrFinishedMap, results?.gameStatusMap]);
   
   // Memoize parsed bet amount to avoid parsing on every render
   // Use debounced value for calculations to prevent expensive recalculations on every keystroke
