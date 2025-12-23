@@ -478,7 +478,7 @@ export default function ScanScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [useDecimalOdds, setUseDecimalOdds] = useState(false);
-  const [hideInProgressGames, setHideInProgressGames] = useState(false);
+  const [hideInProgressGames, setHideInProgressGames] = useState(true);
   const [lastResponseTime, setLastResponseTime] = useState<number | null>(null);
   const [isFromCache, setIsFromCache] = useState(false);
   
