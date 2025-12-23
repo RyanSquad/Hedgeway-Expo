@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback, useMemo, useRef, memo, useId } from '
 import { YStack, XStack, Text, ScrollView, Spinner, Card, Separator, Switch, Label, Input, Button } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
 import { Platform } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
 import { get, clearCache } from '../lib/api';
 import { RefreshControl, Pressable, View, useWindowDimensions } from 'react-native';
 import { NavigationBar } from '../components/NavigationBar';
@@ -152,41 +151,7 @@ function formatGameTime(timestamp: number | null): string {
   }
 }
 
-const REFRESH_INTERVAL_KEY = 'hedgeway_scan_refresh_interval';
 const DEFAULT_REFRESH_INTERVAL = 60; // seconds
-
-// Cross-platform storage utility
-const isWeb = Platform.OS === 'web';
-
-async function getStoredValue(key: string): Promise<string | null> {
-  try {
-    if (isWeb) {
-      if (typeof window !== 'undefined') {
-        return localStorage.getItem(key);
-      }
-      return null;
-    } else {
-      return await SecureStore.getItemAsync(key);
-    }
-  } catch (error) {
-    console.error('Error getting stored value:', error);
-    return null;
-  }
-}
-
-async function setStoredValue(key: string, value: string): Promise<void> {
-  try {
-    if (isWeb) {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(key, value);
-      }
-    } else {
-      await SecureStore.setItemAsync(key, value);
-    }
-  } catch (error) {
-    console.error('Error setting stored value:', error);
-  }
-}
 
 // Memoized component for list items to prevent unnecessary re-renders
 interface ProcessedArb extends ArbOpportunity {
@@ -479,27 +444,13 @@ export default function ScanScreen() {
   
   // Input values (for display only, don't trigger calculations)
   const [betAmountInput, setBetAmountInput] = useState<string>('100');
-  const [refreshIntervalInput, setRefreshIntervalInput] = useState<string>(DEFAULT_REFRESH_INTERVAL.toString());
   
   // Actual values used for calculations (only updated when Save is pressed)
   const [betAmountForCalculation, setBetAmountForCalculation] = useState<string>('100');
-  const [refreshInterval, setRefreshInterval] = useState<string>(DEFAULT_REFRESH_INTERVAL.toString());
   
   // Polling interval ref for smart polling based on nextRefreshSeconds
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Load stored refresh interval on mount
-  useEffect(() => {
-    const loadStoredInterval = async () => {
-      const saved = await getStoredValue(REFRESH_INTERVAL_KEY);
-      if (saved) {
-        setRefreshIntervalInput(saved);
-        setRefreshInterval(saved);
-      }
-    };
-    loadStoredInterval();
-  }, []);
-
   const fetchScanResults = useCallback(async (isManualRefresh = false, skipCache = false) => {
     try {
       if (isManualRefresh) {
@@ -567,9 +518,9 @@ export default function ScanScreen() {
     // Initial fetch
     fetchScanResults();
 
-    // Set up adaptive polling based on user-defined interval and response times
+    // Set up adaptive polling based on default interval and response times
     const calculateAdaptiveInterval = (): number => {
-      const baseIntervalSeconds = parseInt(refreshInterval, 10) || DEFAULT_REFRESH_INTERVAL;
+      const baseIntervalSeconds = DEFAULT_REFRESH_INTERVAL;
       
       // If we have response time history, adjust interval based on average response time
       if (responseTimeHistoryRef.current.length > 0) {
@@ -609,15 +560,7 @@ export default function ScanScreen() {
         pollingIntervalRef.current = null;
       }
     };
-  }, [fetchScanResults, refreshInterval]);
-
-  const handleRefreshIntervalInputChange = useCallback((value: string) => {
-    // Only allow numbers
-    const numericValue = value.replace(/[^0-9]/g, '');
-    if (numericValue === '' || parseInt(numericValue, 10) > 0) {
-      setRefreshIntervalInput(numericValue);
-    }
-  }, []);
+  }, [fetchScanResults]);
 
   const handleRefresh = useCallback(() => {
     const now = Date.now();
@@ -649,20 +592,33 @@ export default function ScanScreen() {
       ? parts[0] + '.' + parts.slice(1).join('')
       : numericValue;
     setBetAmountInput(formatted);
+
+    // On mobile, immediately apply the new bet amount so the page rerenders
+    if (Platform.OS !== 'web') {
+      const betValue = formatted || '100';
+      setBetAmountForCalculation(betValue);
+    }
   }, []);
 
   const handleSaveSettings = useCallback(async () => {
     // Save bet amount
     const betValue = betAmountInput || '100';
     setBetAmountForCalculation(betValue);
-    
-    // Save refresh interval
-    const intervalValue = refreshIntervalInput || DEFAULT_REFRESH_INTERVAL.toString();
-    setRefreshInterval(intervalValue);
-    
-    // Save to cross-platform storage
-    await setStoredValue(REFRESH_INTERVAL_KEY, intervalValue);
-  }, [betAmountInput, refreshIntervalInput]);
+  }, [betAmountInput]);
+
+  const handleSettingsInputKeyPress = useCallback(
+    (event: any) => {
+      const key = event?.nativeEvent?.key ?? event?.key;
+
+      if (key === 'Enter') {
+        if (typeof event.preventDefault === 'function') {
+          event.preventDefault();
+        }
+        handleSaveSettings();
+      }
+    },
+    [handleSaveSettings]
+  );
 
   // Memoize calculations before conditional returns (Rules of Hooks)
   const arbs = results?.arbs || [];
@@ -765,7 +721,7 @@ export default function ScanScreen() {
           </Text>
         )}
         <XStack justifyContent="space-between" alignItems="center" marginTop="$2">
-          <XStack alignItems="center" space="$3">
+          <XStack alignItems="center" space={isMobile ? "$2" : "$3"}>
             <XStack alignItems="center" space="$2">
               <Label htmlFor={betAmountId} fontSize="$2" color="$colorPress">
                 Bet Amount: $
@@ -775,44 +731,28 @@ export default function ScanScreen() {
                 value={betAmountInput}
                 onChangeText={handleBetAmountInputChange}
                 keyboardType="numeric"
-                size="$3"
-                width={80}
+                onKeyPress={handleSettingsInputKeyPress}
+                size={isMobile ? "$2" : "$3"}
+                width={isMobile ? 70 : 80}
                 borderColor="$borderColor"
                 backgroundColor="$background"
-                fontSize="$3"
+                fontSize={isMobile ? "$2" : "$3"}
                 paddingHorizontal="$2"
+                marginRight={isMobile ? "$2" : 0}
               />
             </XStack>
-            <XStack alignItems="center" space="$2">
-              <Label htmlFor={refreshIntervalId} fontSize="$2" color="$colorPress">
-                Refresh: 
-              </Label>
-              <Input
-                id={refreshIntervalId}
-                value={refreshIntervalInput}
-                onChangeText={handleRefreshIntervalInputChange}
-                keyboardType="numeric"
+            {Platform.OS === 'web' && (
+              <Button
                 size="$3"
-                width={60}
-                borderColor="$borderColor"
-                backgroundColor="$background"
-                fontSize="$3"
-                paddingHorizontal="$2"
-              />
-              <Text fontSize="$2" color="$colorPress">
-                sec
-              </Text>
-            </XStack>
-            <Button
-              size="$3"
-              theme="active"
-              onPress={handleSaveSettings}
-              paddingHorizontal="$3"
-            >
-              <Text fontSize="$3">Save</Text>
-            </Button>
+                theme="active"
+                onPress={handleSaveSettings}
+                paddingHorizontal="$3"
+              >
+                <Text fontSize="$3">Save</Text>
+              </Button>
+            )}
           </XStack>
-          <XStack alignItems="center" space="$3">
+          <XStack alignItems="center" space={isMobile ? "$2" : "$3"}>
             <XStack alignItems="center" space="$2">
               <Label htmlFor={oddsToggleId} fontSize="$2" color="$colorPress">
                 {useDecimalOdds ? 'Decimal' : 'American'}
@@ -843,7 +783,7 @@ export default function ScanScreen() {
         </XStack>
         <XStack alignItems="center" space="$2" marginTop="$2" flexWrap="wrap">
           <Text fontSize="$2" color="$colorPress">
-            Auto-refreshing every {Math.max(3, parseInt(refreshInterval, 10) || DEFAULT_REFRESH_INTERVAL)} seconds
+            Auto-refreshing every {Math.max(3, DEFAULT_REFRESH_INTERVAL)} seconds
           </Text>
           {refreshing && (
             <Text fontSize="$2" color="$blue10">
