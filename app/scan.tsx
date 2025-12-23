@@ -362,20 +362,20 @@ const ArbCard = memo(({
   const cardContent = (
     <Card 
       elevate 
-      padding="$4" 
+      padding="$3" 
       backgroundColor="$backgroundStrong"
     >
-      <YStack space="$3">
+      <YStack space="$2">
         <XStack justifyContent="space-between" alignItems="flex-start">
           <YStack flex={1}>
-            <Text fontSize="$6" fontWeight="bold" color="$color">
+            <Text fontSize="$5" fontWeight="bold" color="$color">
               {arb.playerName}
             </Text>
-            <Text fontSize="$4" color="$colorPress" marginTop="$1">
+            <Text fontSize="$4" color="$colorPress" marginTop="$0.5">
               {arb.gameLabel}
             </Text>
             {arb.gameTime && (
-              <Text fontSize="$2" color="$colorPress" marginTop="$1">
+              <Text fontSize="$2" color="$colorPress" marginTop="$0.5">
                 {arb.gameTime}
               </Text>
             )}
@@ -386,13 +386,13 @@ const ArbCard = memo(({
             )}
           </YStack>
           <YStack alignItems="flex-end">
-            <Text fontSize="$6" fontWeight="bold" color="$green10">
+            <Text fontSize="$5" fontWeight="bold" color="$green10">
               {arb.edge}
             </Text>
             <Text fontSize="$2" color="$colorPress">
               Arb Edge
             </Text>
-            <Text fontSize="$4" fontWeight="600" color="$green10" marginTop="$1">
+            <Text fontSize="$4" fontWeight="600" color="$green10" marginTop="$0.5">
               {arb.profit}
             </Text>
             <Text fontSize="$2" color="$colorPress">
@@ -401,42 +401,42 @@ const ArbCard = memo(({
           </YStack>
         </XStack>
 
-        <Separator marginVertical="$2" />
+        <Separator marginVertical="$1.5" />
 
-        <YStack space="$2">
+        <YStack space="$1.5">
           <XStack justifyContent="space-between" alignItems="center">
-            <Text fontSize="$4" fontWeight="600" color="$color">
+            <Text fontSize="$3" fontWeight="600" color="$color">
               {arb.propTypeDisplay} {arb.lineValue}
             </Text>
           </XStack>
 
-          <XStack justifyContent="space-between" space="$4">
-            <YStack flex={1} padding="$3" backgroundColor="$green2" borderRadius="$2">
-              <Text fontSize="$2" color="$green11" marginBottom="$1">
+          <XStack justifyContent="space-between" space="$3">
+            <YStack flex={1} padding="$2.5" backgroundColor="$green2" borderRadius="$2">
+              <Text fontSize="$2" color="$green11" marginBottom="$0.5">
                 OVER
               </Text>
-              <Text fontSize="$5" fontWeight="bold" color="$green11">
+              <Text fontSize="$4" fontWeight="bold" color="$green11">
                 {formatOdds(arb.over.odds, useDecimalOdds)}
               </Text>
-              <Text fontSize="$3" fontWeight="600" color="$green11" marginTop="$1">
+              <Text fontSize="$3" fontWeight="600" color="$green11" marginTop="$0.5">
                 {formatProfit(arb.betAmounts.over)}
               </Text>
-              <Text fontSize="$2" color="$green11" marginTop="$1">
+              <Text fontSize="$2" color="$green11" marginTop="$0.5">
                 {arb.over.vendor}
               </Text>
             </YStack>
 
-            <YStack flex={1} padding="$3" backgroundColor="$red2" borderRadius="$2">
-              <Text fontSize="$2" color="$red11" marginBottom="$1">
+            <YStack flex={1} padding="$2.5" backgroundColor="$red2" borderRadius="$2">
+              <Text fontSize="$2" color="$red11" marginBottom="$0.5">
                 UNDER
               </Text>
-              <Text fontSize="$5" fontWeight="bold" color="$red11">
+              <Text fontSize="$4" fontWeight="bold" color="$red11">
                 {formatOdds(arb.under.odds, useDecimalOdds)}
               </Text>
-              <Text fontSize="$3" fontWeight="600" color="$red11" marginTop="$1">
+              <Text fontSize="$3" fontWeight="600" color="$red11" marginTop="$0.5">
                 {formatProfit(arb.betAmounts.under)}
               </Text>
-              <Text fontSize="$2" color="$red11" marginTop="$1">
+              <Text fontSize="$2" color="$red11" marginTop="$0.5">
                 {arb.under.vendor}
               </Text>
             </YStack>
@@ -883,7 +883,7 @@ export default function ScanScreen() {
             </Text>
           </YStack>
         ) : isMobile ? (
-          <YStack space="$4">
+          <YStack space="$3">
             {processedArbs.map((processed) => (
               <ArbCard
                 key={processed.key}
@@ -894,9 +894,9 @@ export default function ScanScreen() {
             ))}
           </YStack>
         ) : (
-          <XStack flexWrap="wrap" space="$4">
+          <XStack flexWrap="wrap" space="$3">
             {processedArbs.map((processed) => (
-              <YStack key={processed.key} flex={1} minWidth="48%" maxWidth="48%" marginBottom={Platform.OS === 'web' ? "$4" : undefined}>
+              <YStack key={processed.key} flex={1} minWidth="48%" maxWidth="48%" marginBottom={Platform.OS === 'web' ? "$3" : undefined}>
                 <ArbCard
                   arb={processed}
                   useDecimalOdds={useDecimalOdds}
