@@ -770,17 +770,7 @@ export default function ScanScreen() {
           <Text fontSize="$8" fontWeight="bold" color="$color">
             Scan Results
           </Text>
-          {results?.timestamp && (
-            <Text fontSize="$2" color="$colorPress">
-              {formatGameTime(results.timestamp)}
-            </Text>
-          )}
         </XStack>
-        {results?.date && (
-          <Text fontSize="$3" color="$colorPress">
-            Date: {results.date}
-          </Text>
-        )}
         <XStack justifyContent="space-between" alignItems="center" marginTop="$2">
           <XStack alignItems="center" space={isMobile ? "$2" : "$3"}>
             <XStack alignItems="center" space="$2">
