@@ -123,18 +123,119 @@ function calculateBetAmounts(
   };
 }
 
-function formatDate(dateString: string): string {
+// Helper function for consistent date formatting to EST/EDT
+function formatDateToEST(date: Date): string {
+  // Check if date is valid
+  if (isNaN(date.getTime())) {
+    return 'Invalid Date';
+  }
+  
   try {
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
+    // Use Intl.DateTimeFormat to get Eastern Time components
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
       month: 'short',
       day: 'numeric',
-      hour: 'numeric',
+      hour: '2-digit',
       minute: '2-digit',
-      hour12: true,
+      hour12: false,
     });
-  } catch {
-    return dateString;
+    
+    // Format parts
+    const parts = formatter.formatToParts(date);
+    const month = parts.find(p => p.type === 'month')?.value || '';
+    const day = parts.find(p => p.type === 'day')?.value || '';
+    let hours = parts.find(p => p.type === 'hour')?.value || '00';
+    const minutes = parts.find(p => p.type === 'minute')?.value || '00';
+    
+    // Ensure hours are padded (should already be from '2-digit', but just in case)
+    hours = hours.padStart(2, '0');
+    
+    // Determine if EST or EDT
+    // Get the timezone offset for Eastern Time
+    const easternFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      timeZoneName: 'short',
+    });
+    const timeZoneParts = easternFormatter.formatToParts(date);
+    const timeZoneName = timeZoneParts.find(p => p.type === 'timeZoneName')?.value || 'EST';
+    
+    const result = `${month} ${day} @ ${hours}:${minutes} ${timeZoneName}`;
+    // Final safety check - ensure we never return an ISO string
+    // Check for ISO pattern: T followed by digits (like T03:00:00) or Z at the end
+    const isoPattern = /T\d{2}:\d{2}/; // Matches T followed by HH:MM pattern
+    if (isoPattern.test(result) || result.endsWith('Z')) {
+      console.error('formatDateToEST produced ISO-like string:', result);
+      // Use fallback instead
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const fallbackMonth = monthNames[date.getUTCMonth()];
+      const fallbackDay = date.getUTCDate();
+      const fallbackHours = String(date.getUTCHours()).padStart(2, '0');
+      const fallbackMinutes = String(date.getUTCMinutes()).padStart(2, '0');
+      return `${fallbackMonth} ${fallbackDay} @ ${fallbackHours}:${fallbackMinutes} EST`;
+    }
+    return result;
+  } catch (error) {
+    // Fallback if Intl API fails
+    console.warn('Error in formatDateToEST, using fallback:', error);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = monthNames[date.getUTCMonth()];
+    const day = date.getUTCDate();
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    return `${month} ${day} @ ${hours}:${minutes} EST`;
+  }
+}
+
+function formatDate(dateString: string): string {
+  try {
+    if (!dateString || typeof dateString !== 'string') return '';
+    // Trim whitespace
+    const trimmed = dateString.trim();
+    if (!trimmed) return '';
+    
+    // If it's already a formatted date (contains @ and EST/EDT), return as is
+    if (trimmed.includes('@') && (trimmed.includes('EST') || trimmed.includes('EDT'))) {
+      return trimmed;
+    }
+    
+    // If it's a raw ISO string, we MUST format it - never return it as-is
+    if (trimmed.includes('T') && trimmed.includes('Z')) {
+      const date = new Date(trimmed);
+      // Check if date is valid before formatting
+      if (isNaN(date.getTime())) {
+        console.warn('Invalid ISO date string:', dateString);
+        return ''; // Return empty string instead of raw ISO string
+      }
+      const formatted = formatDateToEST(date);
+      // Double-check we didn't get back a raw ISO string
+      // Check for ISO pattern: T followed by digits (like T03:00:00) or Z at the end
+      const isoPattern = /T\d{2}:\d{2}/; // Matches T followed by HH:MM pattern
+      if (formatted && (isoPattern.test(formatted) || formatted.endsWith('Z'))) {
+        console.warn('formatDateToEST returned ISO-like string, retrying:', formatted);
+        return ''; // Return empty string instead of raw ISO string
+      }
+      return formatted;
+    }
+    
+    // Try to parse as date anyway
+    const date = new Date(trimmed);
+    if (isNaN(date.getTime())) {
+      console.warn('Invalid date string:', dateString);
+      return ''; // Return empty string instead of raw ISO string
+    }
+    const formatted = formatDateToEST(date);
+    // Double-check we didn't get back a raw ISO string
+    if (formatted && (formatted.includes('T') || formatted.includes('Z'))) {
+      console.warn('formatDateToEST returned ISO-like string:', formatted);
+      return ''; // Return empty string instead of raw ISO string
+    }
+    return formatted;
+  } catch (error) {
+    console.warn('Error formatting date:', dateString, error);
+    return ''; // Return empty string instead of raw ISO string
   }
 }
 
@@ -142,13 +243,7 @@ function formatGameTime(timestamp: number | null): string {
   if (!timestamp) return 'N/A';
   try {
     const date = new Date(timestamp);
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
+    return formatDateToEST(date);
   } catch {
     return 'N/A';
   }
@@ -374,11 +469,164 @@ const ArbCard = memo(({
             <Text fontSize="$4" color="$colorPress" marginTop="$0.5">
               {arb.gameLabel}
             </Text>
-            {arb.gameTime && (
-              <Text fontSize="$2" color="$colorPress" marginTop="$0.5">
-                {arb.gameTime}
-              </Text>
-            )}
+            {(() => {
+              // Final safety check in render: split if concatenated
+              let displayTime = arb.gameTime;
+              
+              // CRITICAL: If arb.gameTime is null or looks like an ISO string, don't render anything
+              // NEVER use gameTimeRaw as a fallback
+              if (!displayTime || displayTime.trim() === '') {
+                console.log('Render: arb.gameTime is null/empty - not rendering');
+                return null;
+              }
+              
+              // ABSOLUTE BLOCK: Check if it's a raw ISO string - if so, reject it immediately and return null (no span)
+              // Check for full ISO date pattern (YYYY-MM-DDTHH:MM:SS), not just 'T' which appears in "EST"
+              const isIsoString = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(displayTime) && displayTime.endsWith('Z');
+              if (isIsoString) {
+                console.error('Render: BLOCKED - arb.gameTime is raw ISO string, preventing span from rendering:', displayTime);
+                return null; // Return null to prevent the span from appearing at all
+              }
+              
+              // Also check if it matches the gameTimeRaw value exactly - if so, block it
+              if (arb.gameTimeRaw && displayTime === arb.gameTimeRaw) {
+                console.error('Render: BLOCKED - arb.gameTime matches gameTimeRaw, preventing span:', displayTime);
+                return null; // Return null to prevent the span from appearing
+              }
+              
+              // Also check if displayTime contains the gameTimeRaw value (concatenated)
+              if (arb.gameTimeRaw && displayTime.includes(arb.gameTimeRaw)) {
+                console.error('Render: BLOCKED - arb.gameTime contains gameTimeRaw, preventing span:', displayTime);
+                return null; // Return null to prevent the span from appearing
+              }
+              
+              // Check if it looks like an ISO string in any way (starts with YYYY-MM-DD pattern)
+              if (/^\d{4}-\d{2}-\d{2}T/.test(displayTime)) {
+                console.error('Render: BLOCKED - arb.gameTime starts with ISO date pattern, preventing span:', displayTime);
+                return null; // Return null to prevent the span from appearing
+              }
+              
+              // Additional check: if it contains any ISO-like pattern anywhere in the string
+              if (/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(displayTime)) {
+                console.error('Render: BLOCKED - arb.gameTime contains ISO pattern anywhere, preventing span:', displayTime);
+                return null; // Return null to prevent the span from appearing
+              }
+              
+              // Debug: log what we're actually rendering
+              console.log('Render: arb.gameTime value:', displayTime, 'Type:', typeof displayTime, 'Length:', displayTime.length);
+              // Also check if arb has any other properties that might contain the raw value
+              console.log('Render: Full arb object keys:', Object.keys(arb));
+              if (arb.gameTimeRaw) {
+                console.log('Render: arb.gameTimeRaw:', arb.gameTimeRaw, '(should NOT be displayed)');
+              }
+              
+              // Check if arb has any other properties that might contain ISO strings
+              const arbEntries = Object.entries(arb);
+              const isoEntries = arbEntries.filter(([key, value]) => 
+                typeof value === 'string' && 
+                /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value) && 
+                value.endsWith('Z')
+              );
+              if (isoEntries.length > 0) {
+                console.error('Render: WARNING - Found ISO strings in arb object properties:', isoEntries.map(([k, v]) => `${k}: ${v}`));
+                // If displayTime matches any ISO string from arb properties, block it
+                for (const [key, value] of isoEntries) {
+                  if (displayTime === value || (typeof displayTime === 'string' && displayTime.includes(value))) {
+                    console.error(`Render: BLOCKED - displayTime matches or contains ISO string from arb.${key}, preventing span:`, value);
+                    return null;
+                  }
+                }
+              }
+              
+              if (displayTime) {
+                // Check for ISO date pattern and split if found
+                const isoDatePattern = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?/;
+                if (isoDatePattern.test(displayTime)) {
+                  const match = displayTime.match(isoDatePattern);
+                  if (match && match.index !== undefined && match.index > 0) {
+                    const before = displayTime;
+                    displayTime = displayTime.substring(0, match.index).trim();
+                    console.warn('Render: Split concatenated string. Before:', before, 'After:', displayTime);
+                  } else {
+                    displayTime = null; // ISO at start, don't display
+                    console.warn('Render: ISO pattern at start, not displaying');
+                  }
+                }
+                
+                // Also check for raw ISO pattern - but be careful not to reject formatted dates
+                // Only reject if it's a full ISO pattern (YYYY-MM-DDTHH:MM:SS) AND ends with Z
+                if (displayTime && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(displayTime) && displayTime.endsWith('Z')) {
+                  displayTime = null; // Don't display raw ISO strings
+                  console.warn('Render: Raw ISO pattern detected, not displaying');
+                }
+              }
+              
+              // Final absolute check: if displayTime contains any ISO pattern, split it
+              if (displayTime) {
+                const finalIsoCheck = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?/;
+                if (finalIsoCheck.test(displayTime)) {
+                  const match = displayTime.match(finalIsoCheck);
+                  if (match && match.index !== undefined && match.index > 0) {
+                    displayTime = displayTime.substring(0, match.index).trim();
+                    console.error('CRITICAL: Found ISO string in render! Split to:', displayTime);
+                  } else {
+                    displayTime = null;
+                    console.error('CRITICAL: ISO string at start in render!');
+                  }
+                }
+                
+                // Also check if it contains gameTimeRaw
+                if (arb.gameTimeRaw && displayTime && displayTime.includes(arb.gameTimeRaw)) {
+                  const rawIndex = displayTime.indexOf(arb.gameTimeRaw);
+                  if (rawIndex > 0) {
+                    displayTime = displayTime.substring(0, rawIndex).trim();
+                    console.error('CRITICAL: Found gameTimeRaw in render! Split to:', displayTime);
+                  } else {
+                    displayTime = null;
+                    console.error('CRITICAL: gameTimeRaw at start in render!');
+                  }
+                }
+              }
+              
+              // Absolutely ensure we never render gameTimeRaw
+              if (arb.gameTimeRaw && displayTime) {
+                // Double-check displayTime doesn't accidentally contain gameTimeRaw
+                if (displayTime === arb.gameTimeRaw || displayTime.includes(arb.gameTimeRaw)) {
+                  console.error('BLOCKED: Attempted to render gameTimeRaw!', displayTime);
+                  return null;
+                }
+              }
+              
+              // Final check before rendering - ensure we're not rendering an ISO string
+              if (displayTime && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(displayTime) && displayTime.endsWith('Z')) {
+                console.error('FINAL BLOCK: About to render ISO string, blocking!', displayTime);
+                return null;
+              }
+              
+              // ABSOLUTE FINAL CHECK: Before rendering, verify it's not an ISO string
+              // This is the last line of defense - if we get here with an ISO string, something is very wrong
+              if (displayTime && (/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(displayTime) && displayTime.endsWith('Z'))) {
+                console.error('ABSOLUTE BLOCK: About to render Text with ISO string! This should never happen!', displayTime);
+                return null; // Prevent rendering at all costs
+              }
+              
+              // Also check if it matches or contains gameTimeRaw
+              if (arb.gameTimeRaw && displayTime && (displayTime === arb.gameTimeRaw || displayTime.includes(arb.gameTimeRaw))) {
+                console.error('ABSOLUTE BLOCK: About to render Text with gameTimeRaw! This should never happen!', displayTime);
+                return null; // Prevent rendering at all costs
+              }
+              
+              return displayTime ? (
+                <Text 
+                  key={`gametime-${arb.key}-${displayTime}`} 
+                  fontSize="$2" 
+                  color="$colorPress" 
+                  marginTop="$0.5"
+                >
+                  {displayTime}
+                </Text>
+              ) : null;
+            })()}
             {arb.gameStatus && (
               <Text fontSize="$2" color="$colorPress">
                 {arb.gameStatus}
@@ -708,28 +956,259 @@ export default function ScanScreen() {
       const gameLabel = results?.gameMap[arb.gameId.toString()] || `Game ${arb.gameId}`;
       const playerName = results?.playerNameMap[arb.playerId.toString()] || `Player ${arb.playerId}`;
       const gameTime = results?.gameTimeMap[arb.gameId.toString()];
-      const gameStatus = results?.gameStatusMap[arb.gameId.toString()];
+      let gameStatus = results?.gameStatusMap[arb.gameId.toString()];
+      
+      // CRITICAL: Filter out ISO strings from gameStatus - backend might be returning ISO string instead of status
+      if (gameStatus && typeof gameStatus === 'string' && 
+          /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(gameStatus) && 
+          gameStatus.endsWith('Z')) {
+        console.warn('Filtered out ISO string from gameStatus:', gameStatus);
+        gameStatus = undefined; // Don't set gameStatus if it's an ISO string
+      }
       const betAmounts = calculateBetAmounts(arb.over.odds, arb.under.odds, totalBetAmount);
       const profit = calculateProfit(arb.over.odds, arb.under.odds, betAmounts.over, betAmounts.under, totalBetAmount);
       const formattedProfit = formatProfit(profit);
       const formattedEdge = formatEdge(arb.edge);
-      const formattedGameTime = gameTime ? formatDate(gameTime) : null;
+      // Debug: log the raw gameTime value
+      if (gameTime) {
+        console.log('Raw gameTime from API:', gameTime, 'Type:', typeof gameTime);
+      }
+      
+      let formattedGameTime = gameTime ? formatDate(gameTime) : null;
+      
+      // Debug: log the formatted result
+      if (gameTime) {
+        console.log('After formatDate:', formattedGameTime);
+      }
+      
+      // Debug: log if formatting failed
+      if (gameTime && (!formattedGameTime || formattedGameTime.trim() === '')) {
+        console.warn('Date formatting failed for:', gameTime, 'formatted result:', formattedGameTime);
+      }
+      
+      // If formattedGameTime contains the raw ISO string (concatenated), extract only the formatted part
+      if (formattedGameTime) {
+        // More flexible ISO pattern that matches with or without milliseconds and Z
+        const isoDatePattern = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?/;
+        
+        // First check: Does the formatted string contain an ISO date pattern?
+        if (isoDatePattern.test(formattedGameTime)) {
+          // Find where the ISO string starts
+          const match = formattedGameTime.match(isoDatePattern);
+          if (match && match.index !== undefined) {
+            if (match.index > 0) {
+              // ISO string is in the middle or end - extract only the part before it
+              const before = formattedGameTime;
+              formattedGameTime = formattedGameTime.substring(0, match.index).trim();
+              console.warn('Removed ISO string from concatenated result. Before:', before, 'After:', formattedGameTime);
+            } else {
+              // If ISO string is at the start, the formatting failed - set to null
+              formattedGameTime = null;
+              console.warn('ISO string found at start, formatting failed');
+            }
+          }
+        }
+        
+        // Second check: Does it contain the exact raw gameTime value?
+        if (gameTime && formattedGameTime && formattedGameTime.includes(gameTime)) {
+          const isoIndex = formattedGameTime.indexOf(gameTime);
+          if (isoIndex > 0) {
+            const before = formattedGameTime;
+            formattedGameTime = formattedGameTime.substring(0, isoIndex).trim();
+            console.warn('Extracted formatted date from concatenated string. Before:', before, 'After:', formattedGameTime);
+          } else if (isoIndex === 0) {
+            formattedGameTime = null;
+            console.warn('Raw gameTime found at start of formatted string');
+          }
+        }
+        
+        // Final check: Look for any remaining ISO-like patterns and remove them
+        const remainingIsoPattern = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+        if (remainingIsoPattern.test(formattedGameTime)) {
+          const match = formattedGameTime.match(remainingIsoPattern);
+          if (match && match.index !== undefined && match.index > 0) {
+            formattedGameTime = formattedGameTime.substring(0, match.index).trim();
+            console.warn('Final cleanup: Removed remaining ISO pattern. Result:', formattedGameTime);
+          }
+        }
+      }
+      
+      // Final safety check: Remove any ISO string that might still be in formattedGameTime
+      if (formattedGameTime && gameTime) {
+        // Check if formattedGameTime still contains the raw gameTime value
+        if (formattedGameTime.includes(gameTime)) {
+          const splitIndex = formattedGameTime.indexOf(gameTime);
+          if (splitIndex > 0) {
+            formattedGameTime = formattedGameTime.substring(0, splitIndex).trim();
+            console.warn('Final cleanup: Removed raw gameTime from formatted string. Result:', formattedGameTime);
+          } else {
+            formattedGameTime = null;
+            console.warn('Final cleanup: Raw gameTime at start, setting to null');
+          }
+        }
+        
+        // Also check for any ISO date pattern
+        const finalIsoCheck = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?/;
+        if (finalIsoCheck.test(formattedGameTime)) {
+          const match = formattedGameTime.match(finalIsoCheck);
+          if (match && match.index !== undefined && match.index > 0) {
+            formattedGameTime = formattedGameTime.substring(0, match.index).trim();
+            console.warn('Final cleanup: Removed ISO pattern. Result:', formattedGameTime);
+          } else if (match && match.index === 0) {
+            formattedGameTime = null;
+            console.warn('Final cleanup: ISO pattern at start, setting to null');
+          }
+        }
+      }
+      
+      // Ensure we never set gameTime to a raw ISO string - filter it out if formatDate failed
+      // Also ensure we never accidentally use the raw gameTime value
+      // Check for ISO pattern: T followed by digits (like T03:00:00) or Z at the end
+      const isoPattern = /T\d{2}:\d{2}/; // Matches T followed by HH:MM pattern
+      const safeGameTime = formattedGameTime && 
+                          !isoPattern.test(formattedGameTime) && 
+                          !formattedGameTime.endsWith('Z') && 
+                          formattedGameTime.trim() !== '' &&
+                          formattedGameTime !== gameTime && // Never use raw value
+                          !formattedGameTime.includes(gameTime) && // Never include raw ISO string
+                          !/\d{4}-\d{2}-\d{2}T/.test(formattedGameTime) // Never include ISO date pattern
+                          ? formattedGameTime 
+                          : null;
+      
+      // Final debug log
+      if (gameTime && safeGameTime) {
+        console.log('Final safeGameTime:', safeGameTime, 'Original gameTime:', gameTime);
+      } else if (gameTime && !safeGameTime) {
+        console.warn('WARNING: safeGameTime is null but gameTime exists. This means formatting failed or was rejected.');
+      }
+      
+      // CRITICAL: If safeGameTime is null, we MUST NOT set gameTime to the raw value
+      // This prevents the raw ISO string from ever being displayed
+      if (!safeGameTime) {
+        console.warn('safeGameTime is null - will set gameTime to null (not raw ISO string)');
+      }
       const propTypeDisplay = arb.propType.charAt(0).toUpperCase() + arb.propType.slice(1);
       const arbKey = `${arb.gameId}-${arb.playerId}-${arb.propType}-${arb.lineValue}-${arb.timestamp}`;
       
-      return {
-        ...arb,
+      // Destructure to exclude any existing gameTime from the original arb
+      // Also exclude gameTimeRaw to prevent any accidental display
+      const { gameTime: _, gameTimeRaw: __, ...arbWithoutGameTime } = arb;
+      
+      // CRITICAL: Check if arbWithoutGameTime has any properties containing ISO strings and remove them
+      const arbEntries = Object.entries(arbWithoutGameTime);
+      const isoEntries = arbEntries.filter(([key, value]) => 
+        typeof value === 'string' && 
+        /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value) && 
+        value.endsWith('Z')
+      );
+      if (isoEntries.length > 0) {
+        console.error('WARNING: Found ISO strings in arbWithoutGameTime properties:', isoEntries.map(([k, v]) => `${k}: ${v}`));
+        // Remove any properties that contain ISO strings
+        isoEntries.forEach(([key]) => {
+          delete arbWithoutGameTime[key];
+          console.warn(`Removed property ${key} from arbWithoutGameTime because it contains ISO string`);
+        });
+      }
+      
+      // Final verification: ensure safeGameTime doesn't contain the raw ISO string
+      let finalGameTime = safeGameTime;
+      
+      // CRITICAL: If finalGameTime is null or empty, NEVER fall back to raw gameTime
+      // This prevents the raw ISO string from being displayed
+      if (!finalGameTime || finalGameTime.trim() === '') {
+        console.warn('finalGameTime is null/empty - NOT using raw gameTime as fallback');
+        finalGameTime = null; // Explicitly set to null, never use raw value
+      } else {
+        // Only process if we have a valid formatted time
+        if (gameTime && finalGameTime.includes(gameTime)) {
+          const splitIndex = finalGameTime.indexOf(gameTime);
+          if (splitIndex > 0) {
+            finalGameTime = finalGameTime.substring(0, splitIndex).trim();
+            console.warn('Last chance cleanup: Removed raw gameTime. Result:', finalGameTime);
+          } else {
+            finalGameTime = null;
+          }
+        }
+        
+        // Also check for ISO pattern one more time
+        const isoCheck = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?/;
+        if (isoCheck.test(finalGameTime)) {
+          const match = finalGameTime.match(isoCheck);
+          if (match && match.index !== undefined && match.index > 0) {
+            finalGameTime = finalGameTime.substring(0, match.index).trim();
+            console.warn('Last chance cleanup: Removed ISO pattern. Result:', finalGameTime);
+          } else {
+            finalGameTime = null;
+          }
+        }
+        
+        // Final absolute check: if it looks like an ISO string (has full ISO date pattern AND ends with Z), reject it
+        // Don't reject just because it has 'T' (which appears in "EST") or 'Z' in the middle
+        if (finalGameTime && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(finalGameTime) && finalGameTime.endsWith('Z')) {
+          console.error('REJECTED: finalGameTime looks like ISO string:', finalGameTime);
+          finalGameTime = null;
+        }
+      }
+      
+      // Create a completely clean object - don't spread anything that might have stale values
+      const cleanArb: ProcessedArb = {
+        edge: formattedEdge, // Use formatted edge, not raw arb.edge
+        gameId: arb.gameId,
+        playerId: arb.playerId,
+        propType: arb.propType,
+        lineValue: arb.lineValue,
+        marketType: arb.marketType,
+        over: arb.over,
+        under: arb.under,
+        timestamp: arb.timestamp,
+        isLiveOrFinished: arb.isLiveOrFinished,
         gameLabel,
         playerName,
-        gameTime: formattedGameTime,
-        gameTimeRaw: gameTime || null, // Store raw timestamp for CSV
-        gameStatus,
+        // Only set if it's properly formatted - check for ISO pattern, not just 'T' or 'Z' (which appear in timezone names)
+        // CRITICAL: If finalGameTime is null or is an ISO string, set to null to prevent the span from rendering
+        gameTime: (finalGameTime && 
+                   !/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(finalGameTime) && 
+                   !finalGameTime.endsWith('Z') &&
+                   finalGameTime !== gameTime && // Never use raw gameTime value
+                   !finalGameTime.includes(gameTime)) // Never include raw ISO string
+                  ? finalGameTime 
+                  : null, // Only set if it's properly formatted, NEVER raw ISO - null prevents span from rendering
+        // Note: gameTimeRaw is stored separately for CSV export only, never displayed
+        // IMPORTANT: This should NEVER be accessed in render - only for CSV export
+        gameTimeRaw: gameTime || null,
+        // Only set gameStatus if it's not an ISO string
+        gameStatus: (gameStatus && typeof gameStatus === 'string' && 
+                     !/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(gameStatus) && 
+                     !gameStatus.endsWith('Z'))
+                    ? gameStatus 
+                    : undefined,
         betAmounts,
         profit: formattedProfit,
-        edge: formattedEdge,
         propTypeDisplay,
         key: arbKey,
       };
+      
+      // Final sanity check: log what we're actually returning
+      if (cleanArb.gameTime) {
+        // Check for full ISO date pattern (YYYY-MM-DDTHH:MM:SS), not just 'T' which appears in "EST"
+        const containsIso = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(cleanArb.gameTime);
+        console.log('Returning cleanArb.gameTime:', cleanArb.gameTime, 'Contains ISO pattern?', containsIso);
+        if (containsIso) {
+          console.error('ERROR: cleanArb.gameTime contains ISO pattern! Setting to null.');
+          cleanArb.gameTime = null; // Force to null if it contains ISO
+        }
+      } else {
+        console.log('Returning cleanArb.gameTime: null (no formatted time available)');
+      }
+      
+      // ABSOLUTE FINAL CHECK: If gameTime looks like an ISO string (full pattern AND ends with Z), set it to null
+      // Don't reject just because it has 'T' (which appears in "EST") or 'Z' in the middle
+      if (cleanArb.gameTime && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(cleanArb.gameTime) && cleanArb.gameTime.endsWith('Z')) {
+        console.error('FINAL REJECTION: cleanArb.gameTime is ISO string, setting to null');
+        cleanArb.gameTime = null;
+      }
+      
+      return cleanArb;
     });
   }, [filteredArbs, results?.gameMap, results?.playerNameMap, results?.gameTimeMap, results?.gameStatusMap, totalBetAmount]);
   
