@@ -896,7 +896,7 @@ export default function ScanScreen() {
         ) : (
           <XStack flexWrap="wrap" space="$3">
             {processedArbs.map((processed) => (
-              <YStack key={processed.key} flex={1} minWidth="48%" maxWidth="48%" marginBottom={Platform.OS === 'web' ? "$3" : undefined}>
+              <YStack key={processed.key} flex={1} minWidth="32%" maxWidth="32%" marginBottom={Platform.OS === 'web' ? "$3" : undefined}>
                 <ArbCard
                   arb={processed}
                   useDecimalOdds={useDecimalOdds}
