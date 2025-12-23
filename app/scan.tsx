@@ -661,6 +661,8 @@ ArbCard.displayName = 'ArbCard';
 export default function ScanScreen() {
   const { width } = useWindowDimensions();
   const isMobile = width < 700; // Use single column on screens narrower than 700px
+  // Calculate grid columns: 2 columns for 700-1100px, 3 columns for 1100px+
+  const gridColumns = width < 1100 ? 2 : 3;
   
   // Generate unique IDs for form inputs to prevent duplicate ID warnings
   const betAmountId = useId();
@@ -1263,7 +1265,7 @@ export default function ScanScreen() {
           <View
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
+              gridTemplateColumns: `repeat(${gridColumns}, 1fr)`,
               gap: 12, // $3 spacing = 12px
               width: '100%',
             }}
