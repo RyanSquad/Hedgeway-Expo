@@ -65,6 +65,10 @@ export default function AdminPanel() {
     total?: number;
   } | null>(null);
 
+  // Prediction generation state
+  const [generatingPredictions, setGeneratingPredictions] = useState(false);
+  const [predictionResult, setPredictionResult] = useState<string | null>(null);
+
   useEffect(() => {
     if (!authLoading) {
       if (!user || !isSuperAdmin) {
@@ -313,6 +317,52 @@ export default function AdminPanel() {
       setPopulateResult(null);
     } finally {
       setPopulatingStats(false);
+    }
+  };
+
+  /**
+   * Generate predictions for today's games
+   */
+  const handleGeneratePredictions = async () => {
+    try {
+      setGeneratingPredictions(true);
+      setError(null);
+      setPredictionResult(null);
+      setSuccess(null);
+
+      const response = await post<{
+        success?: boolean;
+        message?: string;
+        predictionsGenerated?: number;
+        error?: string;
+      }>('/api/predictions/generate/today', {});
+
+      if (response.error) {
+        const errorMsg = response.error;
+        setError(errorMsg);
+        setPredictionResult(`Error: ${errorMsg}`);
+      } else if (response.data) {
+        if (response.data.success !== false) {
+          const message = response.data.message || 'Predictions generated successfully';
+          const count = response.data.predictionsGenerated 
+            ? ` (${response.data.predictionsGenerated} predictions)` 
+            : '';
+          setSuccess(`${message}${count}`);
+          setPredictionResult(`${message}${count}`);
+          setTimeout(() => setSuccess(null), 10000);
+        } else {
+          const errorMsg = response.data.error || response.data.message || 'Failed to generate predictions';
+          setError(errorMsg);
+          setPredictionResult(`Error: ${errorMsg}`);
+        }
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to generate predictions';
+      console.error('[Admin] Error generating predictions:', err);
+      setError(errorMsg);
+      setPredictionResult(`Error: ${errorMsg}`);
+    } finally {
+      setGeneratingPredictions(false);
     }
   };
 
@@ -652,6 +702,76 @@ export default function AdminPanel() {
                         </Text>
                       )}
                     </YStack>
+                  </Card>
+                )}
+              </YStack>
+            </YStack>
+          </Card>
+
+          {/* Prediction Management */}
+          <Card elevate padding="$4" backgroundColor="$backgroundStrong">
+            <YStack space="$4">
+              <Text fontSize="$6" fontWeight="bold" color="$color">
+                Prediction Management
+              </Text>
+              <Separator />
+              
+              <YStack space="$3">
+                <Text fontSize="$5" fontWeight="600" color="$color">
+                  Generate Predictions for Today
+                </Text>
+                <Text fontSize="$2" color="$colorPress">
+                  Generate model predictions for all player props in today's games. This will:
+                </Text>
+                
+                <Card backgroundColor="$blue2" padding="$2" borderRadius="$2">
+                  <Text fontSize="$2" color="$blue11" fontWeight="600">
+                    📊 This function will:
+                  </Text>
+                  <YStack space="$1" paddingLeft="$2" marginTop="$1">
+                    <Text fontSize="$2" color="$blue11">
+                      • Fetch today's games and player prop odds
+                    </Text>
+                    <Text fontSize="$2" color="$blue11">
+                      • Calculate predicted probabilities using player stats
+                    </Text>
+                    <Text fontSize="$2" color="$blue11">
+                      • Identify value bets (predicted prob vs market implied prob)
+                    </Text>
+                    <Text fontSize="$2" color="$blue11">
+                      • Save predictions to database
+                    </Text>
+                  </YStack>
+                </Card>
+
+                <Card backgroundColor="$yellow2" padding="$2" borderRadius="$2">
+                  <Text fontSize="$2" color="$yellow11">
+                    ⚠️ Note: This requires the prediction backend service to be implemented. 
+                    If you see errors, check that the backend prediction endpoints are available.
+                  </Text>
+                </Card>
+
+                <Button
+                  theme="active"
+                  size="$4"
+                  onPress={handleGeneratePredictions}
+                  disabled={generatingPredictions}
+                >
+                  {generatingPredictions ? (
+                    <XStack alignItems="center" space="$2">
+                      <Spinner size="small" color="$color" />
+                      <Text color="$color">Generating Predictions...</Text>
+                    </XStack>
+                  ) : (
+                    <Text color="$color">Generate Predictions</Text>
+                  )}
+                </Button>
+
+                {predictionResult && (
+                  <Card backgroundColor="$blue2" padding="$3" borderRadius="$3">
+                    <Text color="$blue11" fontSize="$3">
+                      {predictionResult}
+                    </Text>
                   </Card>
                 )}
               </YStack>
