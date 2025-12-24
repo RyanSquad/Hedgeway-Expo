@@ -18,6 +18,8 @@ export function NavigationBar() {
         return 'Scan Results';
       case '/player-stats':
         return 'Player Stats';
+      case '/predictions':
+        return 'Predictions';
       case '/admin':
         return 'Admin Panel';
       default:

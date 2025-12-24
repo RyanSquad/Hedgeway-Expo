@@ -29,6 +29,7 @@ export function SidebarMenu() {
     { label: 'Home', path: '/home', show: true, icon: '🏠' },
     { label: 'Scan Results', path: '/scan', show: true, icon: '🔍' },
     { label: 'Player Stats', path: '/player-stats', show: true, icon: '📊' },
+    { label: 'Predictions', path: '/predictions', show: true, icon: '🎯' },
     { label: 'Admin Panel', path: '/admin', show: isSuperAdmin, icon: '⚙️' },
   ].filter(item => item.show);
 
