@@ -71,6 +71,41 @@ interface PredictionsResponse {
   valueBets?: Prediction[];
 }
 
+interface Game {
+  id: number;
+  date: string;
+  datetime?: string; // Optional: full ISO datetime if available
+  status: string;
+  time: string;
+  home_team: {
+    id: number;
+    abbreviation: string;
+    full_name: string;
+    city: string;
+    name: string;
+  };
+  visitor_team: {
+    id: number;
+    abbreviation: string;
+    full_name: string;
+    city: string;
+    name: string;
+  };
+  home_team_score: number | null;
+  visitor_team_score: number | null;
+}
+
+interface GamesResponse {
+  data: Game[];
+  meta: {
+    total_pages: number;
+    current_page: number;
+    next_page: number | null;
+    per_page: number;
+    total_count: number;
+  };
+}
+
 function formatOdds(odds: number | null): string {
   if (odds === null) return 'N/A';
   if (odds > 0) return `+${odds}`;
@@ -111,22 +146,92 @@ export default function PredictionsPage() {
   const [sortOption, setSortOption] = useState<SortOption>('value-desc');
   const [showPerformanceMetrics, setShowPerformanceMetrics] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [games, setGames] = useState<Game[]>([]);
+  const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
+  const [gamesLoading, setGamesLoading] = useState(false);
+  const [gamesError, setGamesError] = useState<string | null>(null);
   const dropdownRefs = {
     propType: useRef<any>(null),
     minValue: useRef<any>(null),
     sortBy: useRef<any>(null),
   };
 
+  const fetchUpcomingGames = useCallback(async () => {
+    try {
+      setGamesError(null);
+      setGamesLoading(true);
+      
+      // Get today and tomorrow dates in America/New_York timezone
+      const now = new Date();
+      const today = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      
+      const todayStr = today.toISOString().split('T')[0];
+      const tomorrowStr = tomorrow.toISOString().split('T')[0];
+      
+      // Fetch games for today and tomorrow
+      const [todayResponse, tomorrowResponse] = await Promise.all([
+        get<GamesResponse>(`/api/bdl/v1/games?dates[]=${todayStr}&per_page=100`),
+        get<GamesResponse>(`/api/bdl/v1/games?dates[]=${tomorrowStr}&per_page=100`)
+      ]);
+      
+      // Check for errors
+      if (todayResponse.error) {
+        throw new Error(todayResponse.error);
+      }
+      if (tomorrowResponse.error) {
+        throw new Error(tomorrowResponse.error);
+      }
+      
+      // Combine and filter for upcoming games (status: "Scheduled" or not started)
+      const allGames: Game[] = [
+        ...(todayResponse.data?.data || []),
+        ...(tomorrowResponse.data?.data || [])
+      ];
+      
+      // Filter for upcoming games (Scheduled status or status that indicates not started)
+      const upcomingGames = allGames.filter(game => {
+        const status = game.status?.toLowerCase() || '';
+        return status === 'scheduled' || 
+               status === '' || 
+               (!status.includes('qtr') && 
+                status !== 'final' && 
+                status !== 'halftime');
+      });
+      
+      // Sort by date and time
+      upcomingGames.sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+        // If same date, sort by time if available
+        return 0;
+      });
+      
+      setGames(upcomingGames);
+    } catch (err: any) {
+      console.error('Error fetching games:', err);
+      setGamesError(err.message || 'Failed to fetch upcoming games');
+      setGames([]);
+    } finally {
+      setGamesLoading(false);
+    }
+  }, []);
+
   const fetchPredictions = useCallback(async (gameId?: number) => {
     try {
       setError(null);
       setLoading(true);
 
+      // Use selectedGameId if provided, otherwise use gameId parameter
+      const targetGameId = selectedGameId || gameId;
+
       // Fetch predictions - when not showing value bets only, use game endpoint or all predictions
       const endpoint = showValueBetsOnly 
         ? `/api/predictions/value-bets?minValue=${minValue}&minConfidence=${minConfidence || '0'}${propTypeFilter !== 'all' ? `&propType=${propTypeFilter}` : ''}`
-        : gameId 
-          ? `/api/predictions/game/${gameId}${propTypeFilter !== 'all' ? `?propType=${propTypeFilter}` : ''}`
+        : targetGameId 
+          ? `/api/predictions/game/${targetGameId}${propTypeFilter !== 'all' ? `?propType=${propTypeFilter}` : ''}`
           : `/api/predictions/value-bets?minValue=${minValue}&minConfidence=${minConfidence || '0'}${propTypeFilter !== 'all' ? `&propType=${propTypeFilter}` : ''}`;
 
       console.log(`[Predictions] Fetching from endpoint: ${endpoint}`);
@@ -138,24 +243,42 @@ export default function PredictionsPage() {
         setPredictions([]);
       } else if (response.data) {
         console.log('[Predictions] API response data keys:', Object.keys(response.data));
+        
+        let predictionsToSet: Prediction[] = [];
+        
         if ('predictions' in response.data) {
-          const predictions = response.data.predictions || [];
-          console.log(`[Predictions] Found ${predictions.length} predictions`);
-          setPredictions(predictions);
+          predictionsToSet = response.data.predictions || [];
+          console.log(`[Predictions] Found ${predictionsToSet.length} predictions`);
         } else if ('valueBets' in response.data) {
-          const valueBets = response.data.valueBets || [];
-          console.log(`[Predictions] Found ${valueBets.length} value bets (filtered by date=CURRENT_DATE, minValue=${minValue}, minConfidence=${minConfidence || '0'})`);
-          if (valueBets.length === 0 && parseFloat(minValue) === 0 && parseFloat(minConfidence || '0') === 0) {
+          predictionsToSet = response.data.valueBets || [];
+          console.log(`[Predictions] Found ${predictionsToSet.length} value bets (filtered by date=CURRENT_DATE, minValue=${minValue}, minConfidence=${minConfidence || '0'})`);
+          if (predictionsToSet.length === 0 && parseFloat(minValue) === 0 && parseFloat(minConfidence || '0') === 0) {
             console.warn('[Predictions] No value bets found despite no filters. This may indicate:');
             console.warn('  - Predictions exist but not for CURRENT_DATE');
             console.warn('  - Predictions have null predicted_value_over/under');
             console.warn('  - Backend query filtering issue');
           }
-          setPredictions(valueBets);
         } else {
           console.warn('[Predictions] Response data exists but no predictions or valueBets found:', Object.keys(response.data));
-          setPredictions([]);
         }
+        
+        // If a game is selected, filter predictions to only include players from that game's teams
+        if (targetGameId && predictionsToSet.length > 0) {
+          const selectedGame = games.find(g => g.id === targetGameId);
+          if (selectedGame) {
+            const homeTeam = selectedGame.home_team.abbreviation;
+            const visitorTeam = selectedGame.visitor_team.abbreviation;
+            
+            // Filter predictions to only include players from either team
+            predictionsToSet = predictionsToSet.filter(
+              (pred: Prediction) => 
+                pred.team_abbreviation === homeTeam || 
+                pred.team_abbreviation === visitorTeam
+            );
+          }
+        }
+        
+        setPredictions(predictionsToSet);
       } else {
         console.warn('[Predictions] No data or error in response:', response);
         setPredictions([]);
@@ -168,7 +291,11 @@ export default function PredictionsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [propTypeFilter, minValue, minConfidence, showValueBetsOnly]);
+  }, [propTypeFilter, minValue, minConfidence, showValueBetsOnly, selectedGameId, games]);
+
+  useEffect(() => {
+    fetchUpcomingGames();
+  }, [fetchUpcomingGames]);
 
   useEffect(() => {
     fetchPredictions();
@@ -176,8 +303,9 @@ export default function PredictionsPage() {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
+    fetchUpcomingGames();
     fetchPredictions();
-  }, [fetchPredictions]);
+  }, [fetchUpcomingGames, fetchPredictions]);
 
   // Fetch performance metrics
   const fetchPerformanceMetrics = useCallback(async () => {
@@ -254,10 +382,28 @@ export default function PredictionsPage() {
   // Format game time for display
   const formatGameTime = useCallback((timeString?: string): string | null => {
     if (!timeString) return null;
+    
+    // Clean ISO strings from timeString if present
+    let cleaned = timeString
+      .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.0-9]*Z?\s*/g, '')
+      .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/g, '')
+      .replace(/\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?/g, '')
+      .trim();
+    
+    // If cleaned string is empty or only contains ISO patterns, return null
+    if (!cleaned || cleaned.length === 0 || /^\d{4}-\d{2}-\d{2}T/.test(cleaned)) {
+      return null;
+    }
+    
+    // If cleaned string already looks formatted (contains month name), return it as-is
+    if (/^[A-Za-z]{3}\s+\d{1,2}/.test(cleaned)) {
+      return cleaned;
+    }
+    
     try {
-      const date = new Date(timeString);
+      const date = new Date(cleaned);
       if (isNaN(date.getTime())) return null;
-      return date.toLocaleString('en-US', {
+      const formatted = date.toLocaleString('en-US', {
         month: 'short',
         day: 'numeric',
         hour: 'numeric',
@@ -265,8 +411,139 @@ export default function PredictionsPage() {
         hour12: true,
         timeZone: 'America/New_York',
       }) + ' EST';
+      
+      return formatted;
     } catch {
       return null;
+    }
+  }, []);
+
+  // Format game label (e.g., "LAL at BOS")
+  const formatGameLabel = useCallback((game: Game): string => {
+    return `${game.visitor_team.abbreviation} at ${game.home_team.abbreviation}`;
+  }, []);
+
+  // Format game time for display - using same approach as scan.tsx
+  const formatGameTimeDisplay = useCallback((game: Game): string => {
+    try {
+      // Use datetime field if available, otherwise use date field
+      // Both should contain ISO timestamp (e.g., "2025-12-25T22:00:00Z")
+      const isoString = game.datetime || game.date;
+      
+      if (!isoString) {
+        // Fallback to game.time if available, but clean it
+        if (game.time) {
+          // Check if game.time is already formatted (contains month name)
+          if (/^[A-Za-z]{3}\s+\d{1,2}/.test(game.time)) {
+            // Already formatted, but check for ISO strings
+            const cleaned = game.time.replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.0-9]*Z?\s*/g, '').trim();
+            if (cleaned && !/\d{4}-\d{2}-\d{2}T/.test(cleaned)) {
+              return cleaned;
+            }
+          }
+        }
+        return 'TBD';
+      }
+      
+      // Parse the ISO string
+      const date = new Date(isoString);
+      if (isNaN(date.getTime())) {
+        return 'TBD';
+      }
+      
+      // Format using same approach as scan.tsx formatDateToEST
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+      
+      const formatted = formatter.format(date);
+      
+      // Get timezone abbreviation (EST or EDT)
+      const timeZoneFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        timeZoneName: 'short'
+      });
+      const timeZoneName = timeZoneFormatter.formatToParts(date).find(part => part.type === 'timeZoneName')?.value || 'EST';
+      
+      let result = `${formatted} ${timeZoneName}`;
+      
+      // Apply same ISO cleanup logic as scan.tsx (lines 923-985)
+      // Check if formatted result contains the raw ISO string (concatenated)
+      if (result && isoString) {
+        // More flexible ISO pattern that matches with or without milliseconds and Z
+        const isoDatePattern = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?/;
+        
+        // First check: Does the formatted string contain an ISO date pattern?
+        if (isoDatePattern.test(result)) {
+          const match = result.match(isoDatePattern);
+          if (match && match.index !== undefined) {
+            if (match.index > 0) {
+              // ISO string is in the middle or end - extract only the part before it
+              result = result.substring(0, match.index).trim();
+            } else {
+              // If ISO string is at the start, the formatting failed - return TBD
+              return 'TBD';
+            }
+          }
+        }
+        
+        // Second check: Does it contain the exact raw isoString value?
+        if (result && result.includes(isoString)) {
+          const isoIndex = result.indexOf(isoString);
+          if (isoIndex > 0) {
+            result = result.substring(0, isoIndex).trim();
+          } else if (isoIndex === 0) {
+            return 'TBD';
+          }
+        }
+        
+        // Final check: Look for any remaining ISO-like patterns and remove them
+        const remainingIsoPattern = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+        if (remainingIsoPattern.test(result)) {
+          const match = result.match(remainingIsoPattern);
+          if (match && match.index !== undefined && match.index > 0) {
+            result = result.substring(0, match.index).trim();
+          }
+        }
+      }
+      
+      // Final safety check: Remove any ISO string that might still be in result
+      if (result && isoString) {
+        // Check if result still contains the raw isoString value
+        if (result.includes(isoString)) {
+          const splitIndex = result.indexOf(isoString);
+          if (splitIndex > 0) {
+            result = result.substring(0, splitIndex).trim();
+          } else {
+            return 'TBD';
+          }
+        }
+        
+        // Also check for any ISO date pattern
+        const finalIsoCheck = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?/;
+        if (finalIsoCheck.test(result)) {
+          const match = result.match(finalIsoCheck);
+          if (match && match.index !== undefined && match.index > 0) {
+            result = result.substring(0, match.index).trim();
+          } else if (match && match.index === 0) {
+            return 'TBD';
+          }
+        }
+      }
+      
+      // Ensure we never return an ISO string - final validation
+      if (result && (/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(result) && result.endsWith('Z'))) {
+        return 'TBD';
+      }
+      
+      return result || 'TBD';
+    } catch (err) {
+      return 'TBD';
     }
   }, []);
 
@@ -329,6 +606,188 @@ export default function PredictionsPage() {
           <Text fontSize="$8" fontWeight="bold" color="$color">
             Predictions
           </Text>
+
+          {/* Game Selector */}
+          <Card padding="$3" backgroundColor="$backgroundStrong">
+            <YStack space="$3">
+              <XStack justifyContent="space-between" alignItems="center">
+                <Text fontSize="$5" fontWeight="600" color="$color">
+                  Select Game
+                </Text>
+                <Button
+                  onPress={() => {
+                    setSelectedGameId(null);
+                    fetchPredictions();
+                  }}
+                  backgroundColor={selectedGameId === null ? "$blue9" : "$gray5"}
+                  color="white"
+                  size="$3"
+                >
+                  All Games
+                </Button>
+              </XStack>
+              
+              {gamesLoading && (
+                <YStack alignItems="center" padding="$2">
+                  <Spinner size="small" color="$blue9" />
+                  <Text marginTop="$2" fontSize="$3" color="$color10">
+                    Loading games...
+                  </Text>
+                </YStack>
+              )}
+              
+              {gamesError && (
+                <Card padding="$2" backgroundColor="$red5">
+                  <Text color="white" fontSize="$3">{gamesError}</Text>
+                </Card>
+              )}
+              
+              {!gamesLoading && games.length === 0 && !gamesError && (
+                <Text fontSize="$3" color="$color10" textAlign="center">
+                  No upcoming games found.
+                </Text>
+              )}
+              
+              {!gamesLoading && games.length > 0 && (
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingVertical: 8 }}
+                >
+                  <XStack space="$2" flexWrap="wrap">
+                    {games.map((game) => {
+                      const isSelected = selectedGameId === game.id;
+                      const gameLabel = formatGameLabel(game);
+                      let gameTime = formatGameTimeDisplay(game);
+                      
+                      // Get raw ISO string for comparison (same as scan.tsx approach)
+                      const rawIsoString = game.datetime || game.date;
+                      
+                      // Final safety check: if gameTime contains the raw ISO string, extract only the part before it
+                      // This matches the scan.tsx approach (lines 943-951)
+                      if (gameTime && rawIsoString && gameTime.includes(rawIsoString)) {
+                        const isoIndex = gameTime.indexOf(rawIsoString);
+                        if (isoIndex > 0) {
+                          gameTime = gameTime.substring(0, isoIndex).trim();
+                        } else if (isoIndex === 0) {
+                          gameTime = 'TBD'; // If ISO string is at start, formatting failed
+                        }
+                      }
+                      
+                      // Additional safety: remove any ISO patterns that might still be present
+                      if (gameTime && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(gameTime)) {
+                        const match = gameTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?/);
+                        if (match && match.index !== undefined) {
+                          if (match.index > 0) {
+                            gameTime = gameTime.substring(0, match.index).trim();
+                          } else {
+                            gameTime = 'TBD';
+                          }
+                        }
+                      }
+                      
+                      // Final validation: if gameTime looks like an ISO string, set to TBD
+                      if (gameTime && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(gameTime) && gameTime.endsWith('Z')) {
+                        gameTime = 'TBD';
+                      }
+                      
+                      return (
+                        <Pressable
+                          key={game.id}
+                          onPress={() => {
+                            setSelectedGameId(game.id);
+                          }}
+                        >
+                          <Card
+                            padding="$3"
+                            backgroundColor={isSelected ? "$blue9" : "$background"}
+                            borderWidth={isSelected ? 2 : 1}
+                            borderColor={isSelected ? "$blue11" : "$borderColor"}
+                            minWidth={200}
+                          >
+                            <YStack space="$1">
+                              <Text 
+                                fontSize="$4" 
+                                fontWeight={isSelected ? "bold" : "600"}
+                                color={isSelected ? "white" : "$color"}
+                              >
+                                {gameLabel}
+                              </Text>
+                              <Text 
+                                fontSize="$2" 
+                                color={isSelected ? "white" : "$color10"}
+                              >
+                                {(() => {
+                                  // ABSOLUTE BLOCK: If gameTime is exactly the raw ISO string, return TBD
+                                  if (gameTime && (gameTime === rawIsoString || gameTime === game.datetime || gameTime === game.date)) {
+                                    return 'TBD';
+                                  }
+                                  
+                                  // Check if gameTime looks like an ISO string (full pattern AND ends with Z)
+                                  if (gameTime && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(gameTime) && gameTime.endsWith('Z')) {
+                                    return 'TBD';
+                                  }
+                                  
+                                  // Final safety: if gameTime contains ISO, extract only formatted part
+                                  if (gameTime && rawIsoString && gameTime.includes(rawIsoString)) {
+                                    const isoIndex = gameTime.indexOf(rawIsoString);
+                                    if (isoIndex > 0) {
+                                      const cleaned = gameTime.substring(0, isoIndex).trim();
+                                      return cleaned;
+                                    } else if (isoIndex === 0) {
+                                      return 'TBD';
+                                    }
+                                  }
+                                  
+                                  // Also check for ISO pattern
+                                  if (gameTime && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(gameTime)) {
+                                    const match = gameTime.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?/);
+                                    if (match && match.index !== undefined) {
+                                      if (match.index > 0) {
+                                        const cleaned = gameTime.substring(0, match.index).trim();
+                                        return cleaned;
+                                      } else {
+                                        return 'TBD';
+                                      }
+                                    }
+                                  }
+                                  
+                                  return gameTime || 'TBD';
+                                })()}
+                              </Text>
+                              <Text 
+                                fontSize="$2" 
+                                color={isSelected ? "white" : "$color10"}
+                                textTransform="capitalize"
+                              >
+                                {(() => {
+                                  // Check if game.status is an ISO string (like scan.tsx does for gameStatus)
+                                  if (game.status && typeof game.status === 'string' && 
+                                      /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(game.status) && 
+                                      game.status.endsWith('Z')) {
+                                    return 'Scheduled'; // Don't render ISO string as status
+                                  }
+                                  return game.status || 'Scheduled';
+                                })()}
+                              </Text>
+                            </YStack>
+                          </Card>
+                        </Pressable>
+                      );
+                    })}
+                  </XStack>
+                </ScrollView>
+              )}
+              
+              {selectedGameId && games.find(g => g.id === selectedGameId) && (
+                <Card padding="$2" backgroundColor="$blue2">
+                  <Text fontSize="$3" color="$color">
+                    Showing predictions for: {formatGameLabel(games.find(g => g.id === selectedGameId)!)}
+                  </Text>
+                </Card>
+              )}
+            </YStack>
+          </Card>
 
           {/* Performance Metrics Toggle */}
           <Card padding="$3" backgroundColor="$backgroundStrong">
