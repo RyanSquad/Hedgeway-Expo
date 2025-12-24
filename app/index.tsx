@@ -50,6 +50,12 @@ export default function HomeScreen() {
       return;
     }
 
+    // TEMPORARILY DISABLED: Registration is disabled
+    if (!isLogin) {
+      setError('Registration is temporarily disabled. Please contact support for account access.');
+      return;
+    }
+
     if (!email || !password) {
       setError('Please fill in all required fields');
       return;
@@ -260,7 +266,7 @@ export default function HomeScreen() {
         <YStack space="$3">
           <YStack alignItems="center" space="$2" marginBottom="$2">
             <Text fontSize="$10" fontWeight="bold" color="$color">
-              Hedgeway
+              Edgeway
             </Text>
             <Text fontSize="$4" color="$colorPress">
               {isLogin ? 'Sign in to continue' : 'Create your account'}
@@ -283,10 +289,12 @@ export default function HomeScreen() {
               size="$3"
               theme={!isLogin ? 'active' : undefined}
               onPress={() => {
-                setIsLogin(false);
-                setError(null);
+                // TEMPORARILY DISABLED: Registration is disabled
+                setError('Registration is temporarily disabled. Please contact support for account access.');
               }}
               flex={1}
+              disabled
+              opacity={0.5}
             >
               Register
             </Button>

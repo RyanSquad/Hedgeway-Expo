@@ -64,7 +64,7 @@ Returns a welcome message.
 
 Response:
 {
-  "message": "Welcome to Hedgeway API"
+  "message": "Welcome to Edgeway API"
 }
 
 Status Codes:
@@ -770,7 +770,7 @@ const results = await scanResults.json();
 VERSION INFORMATION
 ================================================================================
 
-Server: Hedgeway Server v1.0.0
+Server: Edgeway Server v1.0.0
 Generated: 2024
 
 This documentation is generated from the codebase and may be updated as the API 

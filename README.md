@@ -1,4 +1,4 @@
-# Hedgeway Expo
+# Edgeway Expo
 
 A React Native app built with Expo, featuring Tamagui UI, external API integration, and push notifications.
 

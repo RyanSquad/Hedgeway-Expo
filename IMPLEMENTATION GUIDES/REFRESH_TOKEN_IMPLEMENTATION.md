@@ -1,6 +1,6 @@
 # Refresh Token Implementation Guide
 
-This guide provides step-by-step instructions for implementing refresh tokens in the Hedgeway Server to enable longer user sessions without frequent re-logins.
+This guide provides step-by-step instructions for implementing refresh tokens in the Edgeway Server to enable longer user sessions without frequent re-logins.
 
 ## Overview
 

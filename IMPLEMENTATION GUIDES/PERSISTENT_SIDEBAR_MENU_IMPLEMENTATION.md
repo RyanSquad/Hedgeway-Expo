@@ -84,7 +84,7 @@ export function SidebarMenu() {
         {/* Logo/Title Section */}
         <YStack space="$2" marginBottom="$4">
           <Text fontSize="$8" fontWeight="bold" color="$color">
-            Hedgeway
+            Edgeway
           </Text>
         </YStack>
 
@@ -171,7 +171,7 @@ export function NavigationBar() {
       case '/admin':
         return 'Admin Panel';
       default:
-        return 'Hedgeway';
+        return 'Edgeway';
     }
   };
 
