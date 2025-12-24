@@ -246,7 +246,9 @@ export default function PredictionsPage() {
       };
       if (openDropdown) {
         document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
+        return () => {
+          document.removeEventListener('mousedown', handleClickOutside);
+        };
       }
     }
   }, [openDropdown]);
