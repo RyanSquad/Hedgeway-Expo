@@ -88,6 +88,13 @@ function formatValue(value: number | null): string {
   return `${sign}${(value * 100).toFixed(1)}%`;
 }
 
+function formatNumber(value: number | string | null): string {
+  if (value === null || value === undefined) return 'N/A';
+  const num = typeof value === 'number' ? value : parseFloat(String(value));
+  if (isNaN(num)) return 'N/A';
+  return num.toFixed(1);
+}
+
 type SortOption = 'value-desc' | 'value-asc' | 'confidence-desc' | 'confidence-asc' | 'prop-type' | 'player-name';
 
 export default function PredictionsPage() {
@@ -98,7 +105,8 @@ export default function PredictionsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [propTypeFilter, setPropTypeFilter] = useState<string>('all');
-  const [minValue, setMinValue] = useState<string>('0.05');
+  const [minValue, setMinValue] = useState<string>('0');
+  const [minConfidence, setMinConfidence] = useState<string>('0');
   const [showValueBetsOnly, setShowValueBetsOnly] = useState(false);
   const [sortOption, setSortOption] = useState<SortOption>('value-desc');
   const [showPerformanceMetrics, setShowPerformanceMetrics] = useState(false);
@@ -114,20 +122,42 @@ export default function PredictionsPage() {
       setError(null);
       setLoading(true);
 
-      // Fetch value bets (all games for today)
+      // Fetch predictions - when not showing value bets only, use game endpoint or all predictions
       const endpoint = showValueBetsOnly 
-        ? `/api/predictions/value-bets?minValue=${minValue}&minConfidence=0.5${propTypeFilter !== 'all' ? `&propType=${propTypeFilter}` : ''}`
+        ? `/api/predictions/value-bets?minValue=${minValue}&minConfidence=${minConfidence || '0'}${propTypeFilter !== 'all' ? `&propType=${propTypeFilter}` : ''}`
         : gameId 
           ? `/api/predictions/game/${gameId}${propTypeFilter !== 'all' ? `?propType=${propTypeFilter}` : ''}`
-          : `/api/predictions/value-bets?minValue=0${propTypeFilter !== 'all' ? `&propType=${propTypeFilter}` : ''}`;
+          : `/api/predictions/value-bets?minValue=${minValue}&minConfidence=${minConfidence || '0'}${propTypeFilter !== 'all' ? `&propType=${propTypeFilter}` : ''}`;
 
+      console.log(`[Predictions] Fetching from endpoint: ${endpoint}`);
       const response = await get<PredictionsResponse>(endpoint);
       
-      if ('predictions' in response) {
-        setPredictions(response.predictions || []);
-      } else if ('valueBets' in response) {
-        setPredictions(response.valueBets || []);
+      if (response.error) {
+        console.error('[Predictions] API error:', response.error);
+        setError(response.error);
+        setPredictions([]);
+      } else if (response.data) {
+        console.log('[Predictions] API response data keys:', Object.keys(response.data));
+        if ('predictions' in response.data) {
+          const predictions = response.data.predictions || [];
+          console.log(`[Predictions] Found ${predictions.length} predictions`);
+          setPredictions(predictions);
+        } else if ('valueBets' in response.data) {
+          const valueBets = response.data.valueBets || [];
+          console.log(`[Predictions] Found ${valueBets.length} value bets (filtered by date=CURRENT_DATE, minValue=${minValue}, minConfidence=${minConfidence || '0'})`);
+          if (valueBets.length === 0 && parseFloat(minValue) === 0 && parseFloat(minConfidence || '0') === 0) {
+            console.warn('[Predictions] No value bets found despite no filters. This may indicate:');
+            console.warn('  - Predictions exist but not for CURRENT_DATE');
+            console.warn('  - Predictions have null predicted_value_over/under');
+            console.warn('  - Backend query filtering issue');
+          }
+          setPredictions(valueBets);
+        } else {
+          console.warn('[Predictions] Response data exists but no predictions or valueBets found:', Object.keys(response.data));
+          setPredictions([]);
+        }
       } else {
+        console.warn('[Predictions] No data or error in response:', response);
         setPredictions([]);
       }
     } catch (err: any) {
@@ -138,7 +168,7 @@ export default function PredictionsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [propTypeFilter, minValue, showValueBetsOnly]);
+  }, [propTypeFilter, minValue, minConfidence, showValueBetsOnly]);
 
   useEffect(() => {
     fetchPredictions();
@@ -154,7 +184,11 @@ export default function PredictionsPage() {
     try {
       setPerformanceLoading(true);
       const response = await get<{ performance: ModelPerformance[] }>('/api/predictions/performance?limit=10');
-      setPerformanceMetrics(response.performance || []);
+      if (response.error) {
+        console.error('Error fetching performance metrics:', response.error);
+      } else if (response.data) {
+        setPerformanceMetrics(response.data.performance || []);
+      }
     } catch (err: any) {
       console.error('Error fetching performance metrics:', err);
       // Don't show error for performance metrics, just log it
@@ -264,7 +298,7 @@ export default function PredictionsPage() {
   ];
 
   const minValueOptions = [
-    { value: '0', label: '0%' },
+    { value: '0', label: '0% (All)' },
     { value: '0.03', label: '3%' },
     { value: '0.05', label: '5%' },
     { value: '0.07', label: '7%' },
@@ -740,12 +774,12 @@ export default function PredictionsPage() {
                           <XStack space="$4" flexWrap="wrap">
                             {pred.player_avg_7 !== null && (
                               <Text fontSize="$3" color="$color10">
-                                7-game avg: {pred.player_avg_7.toFixed(1)}
+                                7-game avg: {formatNumber(pred.player_avg_7)}
                               </Text>
                             )}
                             {pred.player_season_avg !== null && (
                               <Text fontSize="$3" color="$color10">
-                                Season avg: {pred.player_season_avg.toFixed(1)}
+                                Season avg: {formatNumber(pred.player_season_avg)}
                               </Text>
                             )}
                           </XStack>
