@@ -130,6 +130,125 @@ function formatNumber(value: number | string | null): string {
   return num.toFixed(1);
 }
 
+/**
+ * Safely parse a date string, returning null if invalid
+ * Prevents RangeError on mobile devices
+ */
+function safeParseDate(dateString: string | null | undefined): Date | null {
+  if (!dateString || typeof dateString !== 'string') {
+    return null;
+  }
+  
+  try {
+    const trimmed = dateString.trim();
+    if (!trimmed) return null;
+    
+    // Try parsing the date
+    const date = new Date(trimmed);
+    
+    // Check if date is valid (not NaN and within reasonable bounds)
+    if (isNaN(date.getTime())) {
+      return null;
+    }
+    
+    // Check if date is within reasonable bounds (year 1900-2100)
+    const year = date.getFullYear();
+    if (year < 1900 || year > 2100) {
+      return null;
+    }
+    
+    return date;
+  } catch (error) {
+    // Catch any RangeError or other date parsing errors
+    console.warn('[safeParseDate] Failed to parse date:', dateString, error);
+    return null;
+  }
+}
+
+/**
+ * Safely format date parts using Intl API with error handling
+ * Prevents RangeError on mobile devices
+ */
+function safeFormatDateParts(date: Date | null, options: Intl.DateTimeFormatOptions): string {
+  if (!date || isNaN(date.getTime())) {
+    return 'TBD';
+  }
+  
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', options);
+    return formatter.format(date);
+  } catch (error) {
+    console.warn('[safeFormatDateParts] Failed to format date:', error);
+    // Fallback to UTC date formatting
+    try {
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                          'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = monthNames[date.getUTCMonth()];
+      const day = date.getUTCDate();
+      const year = date.getUTCFullYear();
+      return `${month} ${day}, ${year}`;
+    } catch {
+      return 'TBD';
+    }
+  }
+}
+
+/**
+ * Safely get timezone name from date with error handling
+ */
+function safeGetTimezoneName(date: Date | null): string {
+  if (!date || isNaN(date.getTime())) {
+    return 'EST';
+  }
+  
+  try {
+    const timeZoneFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      timeZoneName: 'short'
+    });
+    const parts = timeZoneFormatter.formatToParts(date);
+    const timeZoneName = parts.find(part => part.type === 'timeZoneName')?.value;
+    return timeZoneName || 'EST';
+  } catch (error) {
+    console.warn('[safeGetTimezoneName] Failed to get timezone:', error);
+    return 'EST';
+  }
+}
+
+/**
+ * Get today and tomorrow dates in America/New_York timezone safely
+ * Works reliably on mobile devices
+ */
+function getTodayAndTomorrowDates(): { today: Date; tomorrow: Date } {
+  try {
+    const now = new Date();
+    
+    // Get current time in Eastern Time by calculating offset
+    // This is more reliable than using toLocaleString on mobile
+    const easternOffset = -5 * 60; // EST is UTC-5 (EDT is UTC-4, but we'll handle that)
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const easternTime = new Date(utc + (easternOffset * 60000));
+    
+    // Create today date (set to midnight Eastern Time)
+    const today = new Date(easternTime);
+    today.setHours(0, 0, 0, 0);
+    
+    // Create tomorrow date
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    return { today, tomorrow };
+  } catch (error) {
+    console.warn('[getTodayAndTomorrowDates] Error calculating dates, using UTC fallback:', error);
+    // Fallback to UTC dates
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    return { today, tomorrow };
+  }
+}
+
 type SortOption = 'value-desc' | 'value-asc' | 'confidence-desc' | 'confidence-asc' | 'prop-type' | 'player-name';
 
 export default function PredictionsPage() {
@@ -161,11 +280,8 @@ export default function PredictionsPage() {
       setGamesError(null);
       setGamesLoading(true);
       
-      // Get today and tomorrow dates in America/New_York timezone
-      const now = new Date();
-      const today = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      // Get today and tomorrow dates safely
+      const { today, tomorrow } = getTodayAndTomorrowDates();
       
       const todayStr = today.toISOString().split('T')[0];
       const tomorrowStr = tomorrow.toISOString().split('T')[0];
@@ -200,11 +316,19 @@ export default function PredictionsPage() {
                 status !== 'halftime');
       });
       
-      // Sort by date and time
+      // Sort by date and time - with safe date parsing
       upcomingGames.sort((a, b) => {
-        const dateA = new Date(a.date).getTime();
-        const dateB = new Date(b.date).getTime();
-        if (dateA !== dateB) return dateA - dateB;
+        const dateA = safeParseDate(a.date);
+        const dateB = safeParseDate(b.date);
+        
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1; // Invalid dates go to end
+        if (!dateB) return -1;
+        
+        const timeA = dateA.getTime();
+        const timeB = dateB.getTime();
+        
+        if (timeA !== timeB) return timeA - timeB;
         // If same date, sort by time if available
         return 0;
       });
@@ -400,19 +524,22 @@ export default function PredictionsPage() {
       return cleaned;
     }
     
+    // Use safe date parsing
+    const date = safeParseDate(cleaned);
+    if (!date) return null;
+    
     try {
-      const date = new Date(cleaned);
-      if (isNaN(date.getTime())) return null;
-      const formatted = date.toLocaleString('en-US', {
+      const formatted = safeFormatDateParts(date, {
         month: 'short',
         day: 'numeric',
         hour: 'numeric',
         minute: '2-digit',
         hour12: true,
         timeZone: 'America/New_York',
-      }) + ' EST';
+      });
       
-      return formatted;
+      const timeZoneName = safeGetTimezoneName(date);
+      return `${formatted} ${timeZoneName}`;
     } catch {
       return null;
     }
@@ -445,14 +572,14 @@ export default function PredictionsPage() {
         return 'TBD';
       }
       
-      // Parse the ISO string
-      const date = new Date(isoString);
-      if (isNaN(date.getTime())) {
+      // Use safe date parsing
+      const date = safeParseDate(isoString);
+      if (!date) {
         return 'TBD';
       }
       
-      // Format using same approach as scan.tsx formatDateToEST
-      const formatter = new Intl.DateTimeFormat('en-US', {
+      // Format using safe formatting functions
+      const formatted = safeFormatDateParts(date, {
         timeZone: 'America/New_York',
         month: 'short',
         day: 'numeric',
@@ -461,14 +588,8 @@ export default function PredictionsPage() {
         hour12: true,
       });
       
-      const formatted = formatter.format(date);
-      
-      // Get timezone abbreviation (EST or EDT)
-      const timeZoneFormatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/New_York',
-        timeZoneName: 'short'
-      });
-      const timeZoneName = timeZoneFormatter.formatToParts(date).find(part => part.type === 'timeZoneName')?.value || 'EST';
+      // Get timezone abbreviation (EST or EDT) safely
+      const timeZoneName = safeGetTimezoneName(date);
       
       let result = `${formatted} ${timeZoneName}`;
       
@@ -543,6 +664,7 @@ export default function PredictionsPage() {
       
       return result || 'TBD';
     } catch (err) {
+      console.warn('[formatGameTimeDisplay] Error formatting game time:', err);
       return 'TBD';
     }
   }, []);
@@ -827,7 +949,32 @@ export default function PredictionsPage() {
                             {metric.prop_type.charAt(0).toUpperCase() + metric.prop_type.slice(1)} - {metric.model_version}
                           </Text>
                           <Text fontSize="$3" color="$color10">
-                            {new Date(metric.evaluation_period_start).toLocaleDateString()} - {new Date(metric.evaluation_period_end).toLocaleDateString()}
+                            {(() => {
+                              try {
+                                const startDate = safeParseDate(metric.evaluation_period_start);
+                                const endDate = safeParseDate(metric.evaluation_period_end);
+                                
+                                if (!startDate || !endDate) {
+                                  return 'N/A';
+                                }
+                                
+                                const startFormatted = startDate.toLocaleDateString('en-US', { 
+                                  month: 'short', 
+                                  day: 'numeric', 
+                                  year: 'numeric' 
+                                });
+                                const endFormatted = endDate.toLocaleDateString('en-US', { 
+                                  month: 'short', 
+                                  day: 'numeric', 
+                                  year: 'numeric' 
+                                });
+                                
+                                return `${startFormatted} - ${endFormatted}`;
+                              } catch (error) {
+                                console.warn('[PerformanceMetrics] Error formatting dates:', error);
+                                return 'N/A';
+                              }
+                            })()}
                           </Text>
                         </XStack>
                         <Separator />

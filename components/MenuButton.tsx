@@ -25,6 +25,7 @@ export function MenuButton() {
     { label: 'Home', path: '/home', show: true },
     { label: 'Scan Results', path: '/scan', show: true },
     { label: 'Player Stats', path: '/player-stats', show: true },
+    { label: 'Predictions', path: '/predictions', show: true },
     { label: 'Admin Panel', path: '/admin', show: isSuperAdmin },
   ].filter(item => item.show);
 
