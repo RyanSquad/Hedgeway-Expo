@@ -1,6 +1,6 @@
 # Setup Checklist
 
-Follow these steps to get your Hedgeway Expo app up and running:
+Follow these steps to get your Edgeway Expo app up and running:
 
 ## 1. Install Dependencies
 

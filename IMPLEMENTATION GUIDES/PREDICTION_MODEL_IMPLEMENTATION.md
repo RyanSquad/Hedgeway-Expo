@@ -2095,7 +2095,7 @@ const getPageTitle = () => {
     case '/admin':
       return 'Admin Panel';
     default:
-      return 'Hedgeway';
+      return 'Edgeway';
   }
 };
 ```

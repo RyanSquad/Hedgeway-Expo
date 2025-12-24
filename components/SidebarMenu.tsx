@@ -68,7 +68,7 @@ export function SidebarMenu() {
           </Button>
           {!isCollapsed && (
             <Text fontSize="$8" fontWeight="bold" color="$color">
-              Hedgeway
+              Edgeway
             </Text>
           )}
         </XStack>
