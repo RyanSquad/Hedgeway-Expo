@@ -303,6 +303,9 @@ function groupPredictionsByPropType(predictions: Prediction[]): Record<string, P
 
 /**
  * Get prop types in display order
+ * Always maintains consistent header order regardless of sort option.
+ * The sortOption only affects the order of predictions within each group,
+ * not the order of the groups themselves.
  */
 function getPropTypesInOrder(
   groupedPredictions: Record<string, Prediction[]>,
@@ -319,125 +322,9 @@ function getPropTypesInOrder(
     ? allPropTypes.filter(propType => propType === propTypeFilter)
     : allPropTypes;
 
-  // If sorting by prop-type, use PROP_TYPE_ORDER
-  if (sortOption === 'prop-type') {
-    return PROP_TYPE_ORDER.filter(propType => filteredPropTypes.includes(propType));
-  }
-
-  // If sorting by confidence, order groups by confidence scores
-  if (sortOption === 'confidence-desc' || sortOption === 'confidence-asc') {
-    // Get the displayed confidence (predicted_prob_over or predicted_prob_under based on value side)
-    const getDisplayConfidence = (p: Prediction) => {
-      const valueSide = (p.predicted_value_over || 0) > (p.predicted_value_under || 0) ? 'over' : 'under';
-      const prob = valueSide === 'over' ? p.predicted_prob_over : p.predicted_prob_under;
-      return Number(prob) || 0;
-    };
-    
-    const sorted = filteredPropTypes.sort((a, b) => {
-      const groupA = groupedPredictions[a];
-      const groupB = groupedPredictions[b];
-      
-      // Get the highest displayed confidence in each group (for desc) or lowest (for asc)
-      const getGroupConfidence = (group: Prediction[]) => {
-        const confidences = group.map(getDisplayConfidence);
-        if (sortOption === 'confidence-desc') {
-          return Math.max(...confidences);
-        } else {
-          return Math.min(...confidences);
-        }
-      };
-      
-      const confidenceA = getGroupConfidence(groupA);
-      const confidenceB = getGroupConfidence(groupB);
-      
-      // Sort descending for confidence-desc, ascending for confidence-asc
-      const result = sortOption === 'confidence-desc' 
-        ? confidenceB - confidenceA 
-        : confidenceA - confidenceB;
-      
-      // If confidences are equal, use secondary sort by highest value in group
-      if (result === 0) {
-        const getGroupMaxValue = (group: Prediction[]) => {
-          return Math.max(...group.map(p => 
-            Math.max(p.predicted_value_over || 0, p.predicted_value_under || 0)
-          ));
-        };
-        const valueA = getGroupMaxValue(groupA);
-        const valueB = getGroupMaxValue(groupB);
-        const valueResult = valueB - valueA; // Descending by value
-        // If values are also equal, fall back to prop type order
-        if (valueResult === 0) {
-          const indexA = PROP_TYPE_ORDER.indexOf(a);
-          const indexB = PROP_TYPE_ORDER.indexOf(b);
-          return indexA === -1 && indexB === -1 ? 0 : (indexA === -1 ? 1 : (indexB === -1 ? -1 : indexA - indexB));
-        }
-        return valueResult;
-      }
-      
-      return result;
-    });
-    
-    return sorted;
-  }
-
-  // If sorting by value, order groups by highest value in each group
-  if (sortOption === 'value-desc' || sortOption === 'value-asc') {
-    return filteredPropTypes.sort((a, b) => {
-      const groupA = groupedPredictions[a];
-      const groupB = groupedPredictions[b];
-      
-      // Get the highest value in each group
-      const getGroupMaxValue = (group: Prediction[]) => {
-        return Math.max(...group.map(p => 
-          Math.max(p.predicted_value_over || 0, p.predicted_value_under || 0)
-        ));
-      };
-      
-      const valueA = getGroupMaxValue(groupA);
-      const valueB = getGroupMaxValue(groupB);
-      
-      return sortOption === 'value-desc' 
-        ? valueB - valueA 
-        : valueA - valueB;
-    });
-  }
-
-  // If sorting by odds, order groups by best odds in each group
-  if (sortOption === 'odds-desc' || sortOption === 'odds-asc') {
-    return filteredPropTypes.sort((a, b) => {
-      const groupA = groupedPredictions[a];
-      const groupB = groupedPredictions[b];
-      
-      // Get the best odds in each group
-      const getGroupBestOdds = (group: Prediction[]) => {
-        return Math.max(...group.map(p => 
-          Math.max(
-            p.best_over_odds ?? Number.NEGATIVE_INFINITY,
-            p.best_under_odds ?? Number.NEGATIVE_INFINITY
-          )
-        ));
-      };
-      
-      const oddsA = getGroupBestOdds(groupA);
-      const oddsB = getGroupBestOdds(groupB);
-      
-      // Handle null odds
-      if (oddsA === Number.NEGATIVE_INFINITY && oddsB === Number.NEGATIVE_INFINITY) return 0;
-      if (oddsA === Number.NEGATIVE_INFINITY) return 1;
-      if (oddsB === Number.NEGATIVE_INFINITY) return -1;
-      
-      return sortOption === 'odds-desc' 
-        ? oddsB - oddsA 
-        : oddsA - oddsB;
-    });
-  }
-
-  // If sorting by player name, maintain alphabetical order of prop types
-  if (sortOption === 'player-name') {
-    return filteredPropTypes.sort((a, b) => a.localeCompare(b));
-  }
-
-  // Default: use PROP_TYPE_ORDER for any other sort option or no sort
+  // Always use PROP_TYPE_ORDER to maintain consistent header order
+  // The sortOption only affects the order of predictions within each group,
+  // not the order of the groups themselves
   return PROP_TYPE_ORDER.filter(propType => filteredPropTypes.includes(propType));
 }
 
