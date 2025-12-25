@@ -125,6 +125,17 @@ function formatValue(value: number | null): string {
   return `${sign}${(value * 100).toFixed(1)}%`;
 }
 
+function formatDecimalOdds(americanOdds: number | null): string {
+  if (americanOdds === null) return 'N/A';
+  if (americanOdds > 0) {
+    // Positive odds: decimal = (odds / 100) + 1
+    return ((americanOdds / 100) + 1).toFixed(2);
+  } else {
+    // Negative odds: decimal = (100 / abs(odds)) + 1
+    return ((100 / Math.abs(americanOdds)) + 1).toFixed(2);
+  }
+}
+
 function formatNumber(value: number | string | null): string {
   if (value === null || value === undefined) return 'N/A';
   const num = typeof value === 'number' ? value : parseFloat(String(value));
@@ -308,6 +319,32 @@ function getPropTypesInOrder(
   return allPropTypes;
 }
 
+/**
+ * Get opponent team abbreviation for a prediction
+ * Uses game data to determine opponent if not provided by API
+ */
+function getOpponentTeam(prediction: Prediction, gamesList: Game[]): string | undefined {
+  // If opponent_team is already provided, use it
+  if (prediction.opponent_team) {
+    return prediction.opponent_team;
+  }
+  
+  // Find the game for this prediction
+  const game = gamesList.find(g => g.id === prediction.game_id);
+  if (!game || !prediction.team_abbreviation) {
+    return undefined;
+  }
+  
+  // Determine opponent based on player's team
+  if (prediction.team_abbreviation === game.home_team.abbreviation) {
+    return game.visitor_team.abbreviation;
+  } else if (prediction.team_abbreviation === game.visitor_team.abbreviation) {
+    return game.home_team.abbreviation;
+  }
+  
+  return undefined;
+}
+
 export default function PredictionsPage() {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [performanceMetrics, setPerformanceMetrics] = useState<ModelPerformance[]>([]);
@@ -460,6 +497,15 @@ export default function PredictionsPage() {
             );
           }
         }
+        
+        // Enrich predictions with opponent_team if not already provided
+        predictionsToSet = predictionsToSet.map((pred: Prediction) => {
+          const opponentTeam = getOpponentTeam(pred, games);
+          if (opponentTeam && !pred.opponent_team) {
+            return { ...pred, opponent_team: opponentTeam };
+          }
+          return pred;
+        });
         
         setPredictions(predictionsToSet);
       } else {
@@ -1487,6 +1533,7 @@ export default function PredictionsPage() {
                                         <Text fontSize="$6" fontWeight="bold" color="$color">
                                           {playerName}
                                           {pred.team_abbreviation && ` (${pred.team_abbreviation})`}
+                                          {pred.opponent_team && ` v. ${pred.opponent_team}`}
                                         </Text>
                                         <Text fontSize="$5" color="$color" textTransform="capitalize">
                                           {pred.prop_type} {pred.line_value}
@@ -1526,13 +1573,13 @@ export default function PredictionsPage() {
                                     <Separator />
 
                                     {/* Prediction Details */}
-                                    <XStack space="$4" flexWrap="wrap">
+                                    <XStack space="$2" flexWrap="wrap">
                                       <YStack minWidth={150} space="$2">
                                         <Text fontSize="$4" color="$color11" fontWeight="600">
                                           Prediction
                                         </Text>
                                         <Text color="$color">
-                                          {valueSide === 'over' ? 'OVER' : 'UNDER'}
+                                          {valueSide === 'over' ? 'OVER' : 'UNDER'} {valueSide === 'over' ? formatProbability(pred.implied_prob_over) : formatProbability(pred.implied_prob_under)}
                                         </Text>
                                         <Text fontSize="$3" color="$color10">
                                           Confidence: {formatProbability(valueSide === 'over' ? pred.predicted_prob_over : pred.predicted_prob_under)}
@@ -1546,10 +1593,10 @@ export default function PredictionsPage() {
                                         {valueSide === 'over' ? (
                                           <>
                                             <Text color="$color">
-                                              {formatOdds(pred.best_over_odds)} ({formatProbability(pred.implied_prob_over)})
+                                              {formatOdds(pred.best_over_odds)} ({formatDecimalOdds(pred.best_over_odds)})
                                             </Text>
                                             {pred.over_vendor && (
-                                              <Text fontSize="$3" color="$color10">
+                                              <Text fontSize="$3" color="$color10" marginTop="$1">
                                                 {pred.over_vendor}
                                               </Text>
                                             )}
@@ -1557,10 +1604,10 @@ export default function PredictionsPage() {
                                         ) : (
                                           <>
                                             <Text color="$color">
-                                              {formatOdds(pred.best_under_odds)} ({formatProbability(pred.implied_prob_under)})
+                                              {formatOdds(pred.best_under_odds)} ({formatDecimalOdds(pred.best_under_odds)})
                                             </Text>
                                             {pred.under_vendor && (
-                                              <Text fontSize="$3" color="$color10">
+                                              <Text fontSize="$3" color="$color10" marginTop="$1">
                                                 {pred.under_vendor}
                                               </Text>
                                             )}
@@ -1674,6 +1721,7 @@ export default function PredictionsPage() {
                                       <Text fontSize="$6" fontWeight="bold" color="$color">
                                         {playerName}
                                         {pred.team_abbreviation && ` (${pred.team_abbreviation})`}
+                                        {pred.opponent_team && ` v. ${pred.opponent_team}`}
                                       </Text>
                                       <Text fontSize="$5" color="$color" textTransform="capitalize">
                                         {pred.prop_type} {pred.line_value}
@@ -1713,41 +1761,41 @@ export default function PredictionsPage() {
                                   <Separator />
 
                                   {/* Prediction Details */}
-                                  <XStack space="$4" flexWrap="wrap">
-                                    <YStack minWidth={150} space="$2">
+                                  <XStack>
+                                    <YStack flex={1} space="$2">
                                       <Text fontSize="$4" color="$color11" fontWeight="600">
                                         Prediction
                                       </Text>
-                                      <Text color="$color">
-                                        {valueSide === 'over' ? 'OVER' : 'UNDER'}
+                                      <Text fontSize="$3" color="$color">
+                                        {valueSide === 'over' ? 'OVER' : 'UNDER'} {valueSide === 'over' ? formatProbability(pred.implied_prob_over) : formatProbability(pred.implied_prob_under)}
                                       </Text>
-                                      <Text fontSize="$3" color="$color10">
+                                      <Text fontSize="$2" color="$color10">
                                         Confidence: {formatProbability(valueSide === 'over' ? pred.predicted_prob_over : pred.predicted_prob_under)}
                                       </Text>
                                     </YStack>
 
-                                    <YStack minWidth={150} space="$2">
+                                    <YStack flex={1} space="$2">
                                       <Text fontSize="$4" color="$color11" fontWeight="600">
                                         Market Odds
                                       </Text>
                                       {valueSide === 'over' ? (
                                         <>
-                                          <Text color="$color">
-                                            {formatOdds(pred.best_over_odds)} ({formatProbability(pred.implied_prob_over)})
+                                          <Text fontSize="$3" color="$color">
+                                            {formatOdds(pred.best_over_odds)} ({formatDecimalOdds(pred.best_over_odds)})
                                           </Text>
                                           {pred.over_vendor && (
-                                            <Text fontSize="$3" color="$color10">
+                                            <Text fontSize="$2" color="$color10" marginTop="$2">
                                               {pred.over_vendor}
                                             </Text>
                                           )}
                                         </>
                                       ) : (
                                         <>
-                                          <Text color="$color">
-                                            {formatOdds(pred.best_under_odds)} ({formatProbability(pred.implied_prob_under)})
+                                          <Text fontSize="$3" color="$color">
+                                            {formatOdds(pred.best_under_odds)} ({formatDecimalOdds(pred.best_under_odds)})
                                           </Text>
                                           {pred.under_vendor && (
-                                            <Text fontSize="$3" color="$color10">
+                                            <Text fontSize="$2" color="$color10" marginTop="$2">
                                               {pred.under_vendor}
                                             </Text>
                                           )}
@@ -1755,18 +1803,18 @@ export default function PredictionsPage() {
                                       )}
                                     </YStack>
 
-                                    <YStack minWidth={150} space="$2">
+                                    <YStack flex={1} space="$2">
                                       <Text fontSize="$4" color="$color11" fontWeight="600">
                                         Value
                                       </Text>
                                       <Text 
-                                        fontSize="$5" 
+                                        fontSize="$4" 
                                         fontWeight="bold"
                                         color={bestValue >= 0 ? "$green9" : "$red9"}
                                       >
                                         {formatValue(bestValue)}
                                       </Text>
-                                      <Text fontSize="$3" color="$color10">
+                                      <Text fontSize="$2" color="$color10">
                                         {valueSide === 'over' 
                                           ? formatValue(pred.predicted_value_over)
                                           : formatValue(pred.predicted_value_under)
