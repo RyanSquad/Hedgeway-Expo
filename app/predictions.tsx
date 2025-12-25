@@ -1470,8 +1470,7 @@ export default function PredictionsPage() {
                               <YStack 
                                 key={pred.id}
                                 flex={1}
-                                minWidth="29%"
-                                maxWidth="29%"
+                                minWidth="30%"
                                 space="$3"
                               >
                                 <Card
