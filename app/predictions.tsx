@@ -50,23 +50,6 @@ interface Prediction {
   opponent_team?: string;
 }
 
-interface ModelPerformance {
-  id: string;
-  model_version: string;
-  prop_type: string;
-  evaluation_period_start: string;
-  evaluation_period_end: string;
-  total_predictions: number;
-  predictions_with_outcome: number;
-  correct_predictions: number;
-  accuracy: number | null;
-  value_bets_identified: number;
-  value_bets_correct: number;
-  value_bet_accuracy: number | null;
-  avg_predicted_prob: number | null;
-  actual_hit_rate: number | null;
-  calculated_at: string;
-}
 
 interface PredictionsResponse {
   predictions?: Prediction[];
@@ -380,9 +363,7 @@ function isValueBet(
 
 export default function PredictionsPage() {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
-  const [performanceMetrics, setPerformanceMetrics] = useState<ModelPerformance[]>([]);
   const [loading, setLoading] = useState(true);
-  const [performanceLoading, setPerformanceLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [propTypeFilter, setPropTypeFilter] = useState<string>('all');
@@ -390,7 +371,6 @@ export default function PredictionsPage() {
   const [minConfidence, setMinConfidence] = useState<string>('0');
   const [showValueBetsOnly, setShowValueBetsOnly] = useState(false);
   const [sortOption, setSortOption] = useState<SortOption>('value-desc');
-  const [showPerformanceMetrics, setShowPerformanceMetrics] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [games, setGames] = useState<Game[]>([]);
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
@@ -580,30 +560,6 @@ export default function PredictionsPage() {
     fetchUpcomingGames();
     fetchPredictions();
   }, [fetchUpcomingGames, fetchPredictions]);
-
-  // Fetch performance metrics
-  const fetchPerformanceMetrics = useCallback(async () => {
-    try {
-      setPerformanceLoading(true);
-      const response = await get<{ performance: ModelPerformance[] }>('/api/predictions/performance?limit=10');
-      if (response.error) {
-        console.error('Error fetching performance metrics:', response.error);
-      } else if (response.data) {
-        setPerformanceMetrics(response.data.performance || []);
-      }
-    } catch (err: any) {
-      console.error('Error fetching performance metrics:', err);
-      // Don't show error for performance metrics, just log it
-    } finally {
-      setPerformanceLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (showPerformanceMetrics) {
-      fetchPerformanceMetrics();
-    }
-  }, [showPerformanceMetrics, fetchPerformanceMetrics]);
 
   // Sort predictions based on selected option
   const sortedPredictions = useMemo(() => {
@@ -1178,118 +1134,6 @@ export default function PredictionsPage() {
             </YStack>
           </Card>
 
-          {/* Performance Metrics Toggle */}
-          <Card padding="$3" backgroundColor="$backgroundStrong">
-            <XStack justifyContent="space-between" alignItems="center">
-              <Text fontSize="$5" fontWeight="600" color="$color">
-                Model Performance
-              </Text>
-              <Button
-                onPress={() => setShowPerformanceMetrics(!showPerformanceMetrics)}
-                backgroundColor={showPerformanceMetrics ? "$blue9" : "$gray5"}
-                color="white"
-                size="$3"
-              >
-                {showPerformanceMetrics ? 'Hide Metrics' : 'Show Metrics'}
-              </Button>
-            </XStack>
-          </Card>
-
-          {/* Performance Metrics Display */}
-          {showPerformanceMetrics && (
-            <Card padding="$4" backgroundColor="$backgroundStrong">
-              {performanceLoading ? (
-                <YStack alignItems="center" padding="$4">
-                  <Spinner size="small" color="$blue9" />
-                </YStack>
-              ) : performanceMetrics.length === 0 ? (
-                <Text color="$color10" textAlign="center">
-                  No performance metrics available yet. Metrics are calculated after predictions have outcomes.
-                </Text>
-              ) : (
-                <YStack space="$3">
-                  {performanceMetrics.map((metric) => (
-                    <Card key={metric.id} padding="$3" backgroundColor="$background">
-                      <YStack space="$2">
-                        <XStack justifyContent="space-between" alignItems="center">
-                          <Text fontSize="$5" fontWeight="bold" color="$color">
-                            {metric.prop_type.charAt(0).toUpperCase() + metric.prop_type.slice(1)} - {metric.model_version}
-                          </Text>
-                          <Text fontSize="$3" color="$color10">
-                            {(() => {
-                              try {
-                                const startDate = safeParseDate(metric.evaluation_period_start);
-                                const endDate = safeParseDate(metric.evaluation_period_end);
-                                
-                                if (!startDate || !endDate) {
-                                  return 'N/A';
-                                }
-                                
-                                const startFormatted = startDate.toLocaleDateString('en-US', { 
-                                  month: 'short', 
-                                  day: 'numeric', 
-                                  year: 'numeric' 
-                                });
-                                const endFormatted = endDate.toLocaleDateString('en-US', { 
-                                  month: 'short', 
-                                  day: 'numeric', 
-                                  year: 'numeric' 
-                                });
-                                
-                                return `${startFormatted} - ${endFormatted}`;
-                              } catch (error) {
-                                console.warn('[PerformanceMetrics] Error formatting dates:', error);
-                                return 'N/A';
-                              }
-                            })()}
-                          </Text>
-                        </XStack>
-                        <Separator />
-                        <XStack space="$4" flexWrap="wrap">
-                          <YStack minWidth={120}>
-                            <Text fontSize="$3" color="$color10">Accuracy</Text>
-                            <Text fontSize="$5" fontWeight="600" color="$color">
-                              {metric.accuracy !== null ? `${(metric.accuracy * 100).toFixed(1)}%` : 'N/A'}
-                            </Text>
-                            <Text fontSize="$2" color="$color10">
-                              {metric.correct_predictions} / {metric.predictions_with_outcome}
-                            </Text>
-                          </YStack>
-                          <YStack minWidth={120}>
-                            <Text fontSize="$3" color="$color10">Value Bet Accuracy</Text>
-                            <Text fontSize="$5" fontWeight="600" color="$color">
-                              {metric.value_bet_accuracy !== null ? `${(metric.value_bet_accuracy * 100).toFixed(1)}%` : 'N/A'}
-                            </Text>
-                            <Text fontSize="$2" color="$color10">
-                              {metric.value_bets_correct} / {metric.value_bets_identified}
-                            </Text>
-                          </YStack>
-                          <YStack minWidth={120}>
-                            <Text fontSize="$3" color="$color10">Total Predictions</Text>
-                            <Text fontSize="$5" fontWeight="600" color="$color">
-                              {metric.total_predictions}
-                            </Text>
-                          </YStack>
-                          {metric.avg_predicted_prob !== null && metric.actual_hit_rate !== null && (
-                            <YStack minWidth={150}>
-                              <Text fontSize="$3" color="$color10">Calibration</Text>
-                              <Text fontSize="$5" fontWeight="600" color="$color">
-                                Pred: {(metric.avg_predicted_prob * 100).toFixed(1)}%
-                              </Text>
-                              <Text fontSize="$3" color="$color10">
-                                Actual: {(metric.actual_hit_rate * 100).toFixed(1)}%
-                              </Text>
-                            </YStack>
-                          )}
-                        </XStack>
-                      </YStack>
-                    </Card>
-                  ))}
-                </YStack>
-              )}
-            </Card>
-          )}
-
           {/* Filters and Sorting */}
           {openDropdown && (
             <Pressable
@@ -1304,7 +1148,7 @@ export default function PredictionsPage() {
               onPress={() => setOpenDropdown(null)}
             />
           )}
-          <Card padding="$3" backgroundColor="$backgroundStrong">
+          <Card padding="$3" backgroundColor="$backgroundStrong" marginTop="$2">
             <YStack space="$3">
               <XStack space="$3" alignItems="center" flexWrap="wrap">
                 <YStack flex={1} minWidth={150} position="relative" zIndex={openDropdown === 'propType' ? 100 : 1}>
