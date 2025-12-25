@@ -354,6 +354,30 @@ function getOpponentTeam(prediction: Prediction, gamesList: Game[]): string | un
   return undefined;
 }
 
+/**
+ * Determine if a prediction is a value bet
+ * A value bet has either predicted_value_over or predicted_value_under >= minValue
+ * AND the corresponding confidence_score >= minConfidence
+ */
+function isValueBet(
+  prediction: Prediction,
+  minValue: number,
+  minConfidence: number
+): boolean {
+  const valueOver = prediction.predicted_value_over ?? 0;
+  const valueUnder = prediction.predicted_value_under ?? 0;
+  const confidence = prediction.confidence_score ?? 0;
+  
+  // Check if over side is a value bet
+  const overIsValueBet = valueOver >= minValue && confidence >= minConfidence;
+  
+  // Check if under side is a value bet
+  const underIsValueBet = valueUnder >= minValue && confidence >= minConfidence;
+  
+  // A prediction is a value bet if either side meets the criteria
+  return overIsValueBet || underIsValueBet;
+}
+
 export default function PredictionsPage() {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [performanceMetrics, setPerformanceMetrics] = useState<ModelPerformance[]>([]);
@@ -515,6 +539,18 @@ export default function PredictionsPage() {
           }
           return pred;
         });
+        
+        // Filter for value bets only if showValueBetsOnly is enabled
+        if (showValueBetsOnly) {
+          const minValueNum = parseFloat(minValue);
+          const minConfidenceNum = parseFloat(minConfidence || '0');
+          
+          predictionsToSet = predictionsToSet.filter((pred: Prediction) => 
+            isValueBet(pred, minValueNum, minConfidenceNum)
+          );
+          
+          console.log(`[Predictions] Filtered to ${predictionsToSet.length} value bets (minValue=${minValueNum}, minConfidence=${minConfidenceNum})`);
+        }
         
         setPredictions(predictionsToSet);
       } else {
