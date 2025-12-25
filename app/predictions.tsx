@@ -38,6 +38,8 @@ interface Prediction {
   player_last_name: string;
   team_abbreviation: string | null;
   player_avg_7: number | null;
+  player_avg_14: number | null;
+  player_avg_30: number | null;
   player_season_avg: number | null;
   actual_result: string | null;
   actual_value: number | null;
@@ -1468,8 +1470,8 @@ export default function PredictionsPage() {
                               <YStack 
                                 key={pred.id}
                                 flex={1}
-                                minWidth="25%"
-                                maxWidth="25%"
+                                minWidth="29%"
+                                maxWidth="29%"
                                 space="$3"
                               >
                                 <Card
@@ -1531,10 +1533,10 @@ export default function PredictionsPage() {
                                           Prediction
                                         </Text>
                                         <Text color="$color">
-                                          {valueSide === 'over' ? 'OVER' : 'UNDER'}: {formatProbability(valueSide === 'over' ? pred.predicted_prob_over : pred.predicted_prob_under)}
+                                          {valueSide === 'over' ? 'OVER' : 'UNDER'}
                                         </Text>
                                         <Text fontSize="$3" color="$color10">
-                                          Confidence: {formatProbability(pred.confidence_score)}
+                                          Confidence: {formatProbability(valueSide === 'over' ? pred.predicted_prob_over : pred.predicted_prob_under)}
                                         </Text>
                                       </YStack>
 
@@ -1545,7 +1547,7 @@ export default function PredictionsPage() {
                                         {valueSide === 'over' ? (
                                           <>
                                             <Text color="$color">
-                                              OVER: {formatOdds(pred.best_over_odds)} ({formatProbability(pred.implied_prob_over)})
+                                              {formatOdds(pred.best_over_odds)} ({formatProbability(pred.implied_prob_over)})
                                             </Text>
                                             {pred.over_vendor && (
                                               <Text fontSize="$3" color="$color10">
@@ -1556,7 +1558,7 @@ export default function PredictionsPage() {
                                         ) : (
                                           <>
                                             <Text color="$color">
-                                              UNDER: {formatOdds(pred.best_under_odds)} ({formatProbability(pred.implied_prob_under)})
+                                              {formatOdds(pred.best_under_odds)} ({formatProbability(pred.implied_prob_under)})
                                             </Text>
                                             {pred.under_vendor && (
                                               <Text fontSize="$3" color="$color10">
@@ -1588,13 +1590,23 @@ export default function PredictionsPage() {
                                     </XStack>
 
                                     {/* Player Stats Context */}
-                                    {(pred.player_avg_7 !== null || pred.player_season_avg !== null) && (
+                                    {(pred.player_avg_7 !== null || pred.player_avg_14 !== null || pred.player_avg_30 !== null || pred.player_season_avg !== null) && (
                                       <>
                                         <Separator />
                                         <XStack space="$4" flexWrap="wrap">
                                           {pred.player_avg_7 !== null && (
                                             <Text fontSize="$3" color="$color10">
                                               7-game avg: {formatNumber(pred.player_avg_7)}
+                                            </Text>
+                                          )}
+                                          {pred.player_avg_14 !== null && (
+                                            <Text fontSize="$3" color="$color10">
+                                              14-game avg: {formatNumber(pred.player_avg_14)}
+                                            </Text>
+                                          )}
+                                          {pred.player_avg_30 !== null && (
+                                            <Text fontSize="$3" color="$color10">
+                                              30-game avg: {formatNumber(pred.player_avg_30)}
                                             </Text>
                                           )}
                                           {pred.player_season_avg !== null && (
@@ -1708,10 +1720,10 @@ export default function PredictionsPage() {
                                         Prediction
                                       </Text>
                                       <Text color="$color">
-                                        {valueSide === 'over' ? 'OVER' : 'UNDER'}: {formatProbability(valueSide === 'over' ? pred.predicted_prob_over : pred.predicted_prob_under)}
+                                        {valueSide === 'over' ? 'OVER' : 'UNDER'}
                                       </Text>
                                       <Text fontSize="$3" color="$color10">
-                                        Confidence: {formatProbability(pred.confidence_score)}
+                                        Confidence: {formatProbability(valueSide === 'over' ? pred.predicted_prob_over : pred.predicted_prob_under)}
                                       </Text>
                                     </YStack>
 
@@ -1722,7 +1734,7 @@ export default function PredictionsPage() {
                                       {valueSide === 'over' ? (
                                         <>
                                           <Text color="$color">
-                                            OVER: {formatOdds(pred.best_over_odds)} ({formatProbability(pred.implied_prob_over)})
+                                            {formatOdds(pred.best_over_odds)} ({formatProbability(pred.implied_prob_over)})
                                           </Text>
                                           {pred.over_vendor && (
                                             <Text fontSize="$3" color="$color10">
@@ -1733,7 +1745,7 @@ export default function PredictionsPage() {
                                       ) : (
                                         <>
                                           <Text color="$color">
-                                            UNDER: {formatOdds(pred.best_under_odds)} ({formatProbability(pred.implied_prob_under)})
+                                            {formatOdds(pred.best_under_odds)} ({formatProbability(pred.implied_prob_under)})
                                           </Text>
                                           {pred.under_vendor && (
                                             <Text fontSize="$3" color="$color10">
@@ -1765,13 +1777,23 @@ export default function PredictionsPage() {
                                   </XStack>
 
                                   {/* Player Stats Context */}
-                                  {(pred.player_avg_7 !== null || pred.player_season_avg !== null) && (
+                                  {(pred.player_avg_7 !== null || pred.player_avg_14 !== null || pred.player_avg_30 !== null || pred.player_season_avg !== null) && (
                                     <>
                                       <Separator />
                                       <XStack space="$4" flexWrap="wrap">
                                         {pred.player_avg_7 !== null && (
                                           <Text fontSize="$3" color="$color10">
                                             7-game avg: {formatNumber(pred.player_avg_7)}
+                                          </Text>
+                                        )}
+                                        {pred.player_avg_14 !== null && (
+                                          <Text fontSize="$3" color="$color10">
+                                            14-game avg: {formatNumber(pred.player_avg_14)}
+                                          </Text>
+                                        )}
+                                        {pred.player_avg_30 !== null && (
+                                          <Text fontSize="$3" color="$color10">
+                                            30-game avg: {formatNumber(pred.player_avg_30)}
                                           </Text>
                                         )}
                                         {pred.player_season_avg !== null && (
