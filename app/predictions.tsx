@@ -249,7 +249,7 @@ function getTodayAndTomorrowDates(): { today: Date; tomorrow: Date } {
   }
 }
 
-type SortOption = 'value-desc' | 'value-asc' | 'confidence-desc' | 'confidence-asc' | 'prop-type' | 'player-name';
+type SortOption = 'value-desc' | 'value-asc' | 'confidence-desc' | 'confidence-asc' | 'prop-type' | 'player-name' | 'odds-desc' | 'odds-asc';
 
 // Prop type display order
 const PROP_TYPE_ORDER = ['points', 'assists', 'rebounds', 'steals', 'blocks', 'threes'];
@@ -555,6 +555,56 @@ export default function PredictionsPage() {
           return aName.localeCompare(bName);
         });
 
+      case 'odds-desc':
+        return sorted.sort((a, b) => {
+          // Get best odds for each prediction (highest value is best)
+          const aBestOdds = Math.max(
+            a.best_over_odds ?? Number.NEGATIVE_INFINITY,
+            a.best_under_odds ?? Number.NEGATIVE_INFINITY
+          );
+          const bBestOdds = Math.max(
+            b.best_over_odds ?? Number.NEGATIVE_INFINITY,
+            b.best_under_odds ?? Number.NEGATIVE_INFINITY
+          );
+          
+          // If both have null odds, maintain order
+          if (aBestOdds === Number.NEGATIVE_INFINITY && bBestOdds === Number.NEGATIVE_INFINITY) {
+            return 0;
+          }
+          
+          // Predictions with null odds go to the end
+          if (aBestOdds === Number.NEGATIVE_INFINITY) return 1;
+          if (bBestOdds === Number.NEGATIVE_INFINITY) return -1;
+          
+          // Sort descending (best odds first)
+          return bBestOdds - aBestOdds;
+        });
+
+      case 'odds-asc':
+        return sorted.sort((a, b) => {
+          // Get best odds for each prediction (highest value is best)
+          const aBestOdds = Math.max(
+            a.best_over_odds ?? Number.NEGATIVE_INFINITY,
+            a.best_under_odds ?? Number.NEGATIVE_INFINITY
+          );
+          const bBestOdds = Math.max(
+            b.best_over_odds ?? Number.NEGATIVE_INFINITY,
+            b.best_under_odds ?? Number.NEGATIVE_INFINITY
+          );
+          
+          // If both have null odds, maintain order
+          if (aBestOdds === Number.NEGATIVE_INFINITY && bBestOdds === Number.NEGATIVE_INFINITY) {
+            return 0;
+          }
+          
+          // Predictions with null odds go to the end
+          if (aBestOdds === Number.NEGATIVE_INFINITY) return 1;
+          if (bBestOdds === Number.NEGATIVE_INFINITY) return -1;
+          
+          // Sort ascending (worst odds first)
+          return aBestOdds - bBestOdds;
+        });
+
       default:
         return sorted;
     }
@@ -813,6 +863,8 @@ export default function PredictionsPage() {
     { value: 'confidence-asc', label: 'Confidence (Low to High)' },
     { value: 'prop-type', label: 'Prop Type' },
     { value: 'player-name', label: 'Player Name' },
+    { value: 'odds-desc', label: 'Market Odds (Best to Worst)' },
+    { value: 'odds-asc', label: 'Market Odds (Worst to Best)' },
   ];
 
   return (
@@ -1395,180 +1447,372 @@ export default function PredictionsPage() {
 
                     {/* Predictions for this prop type - Conditionally rendered */}
                     {!isCollapsed && (
-                      <YStack space="$3">
-                        {predictionsForType.map((pred) => {
-                        const bestValue = Math.max(
-                          pred.predicted_value_over || 0,
-                          pred.predicted_value_under || 0
-                        );
-                        const isValueBet = bestValue >= parseFloat(minValue);
-                        const valueSide = (pred.predicted_value_over || 0) > (pred.predicted_value_under || 0) ? 'over' : 'under';
-                        const playerName = `${pred.player_first_name} ${pred.player_last_name}`;
+                      Platform.OS === 'web' ? (
+                        // Web: 3-column grid layout
+                        <XStack 
+                          flexWrap="wrap" 
+                          space="$2"
+                          gap="$2"
+                          alignItems="stretch"
+                        >
+                          {predictionsForType.map((pred) => {
+                            const bestValue = Math.max(
+                              pred.predicted_value_over || 0,
+                              pred.predicted_value_under || 0
+                            );
+                            const isValueBet = bestValue >= parseFloat(minValue);
+                            const valueSide = (pred.predicted_value_over || 0) > (pred.predicted_value_under || 0) ? 'over' : 'under';
+                            const playerName = `${pred.player_first_name} ${pred.player_last_name}`;
 
-                        return (
-                          <Card
-                            key={pred.id}
-                            padding="$4"
-                            backgroundColor={isValueBet ? "$green2" : "$backgroundStrong"}
-                            borderWidth={isValueBet ? 2 : 1}
-                            borderColor={isValueBet ? "$green9" : "$borderColor"}
-                          >
-                            <YStack space="$3">
-                              {/* Header with Game Context */}
-                              <XStack justifyContent="space-between" alignItems="flex-start" flexWrap="wrap">
-                                <YStack flex={1} minWidth={200}>
-                                  <Text fontSize="$6" fontWeight="bold" color="$color">
-                                    {playerName}
-                                    {pred.team_abbreviation && ` (${pred.team_abbreviation})`}
-                                  </Text>
-                                  <Text fontSize="$5" color="$color" textTransform="capitalize">
-                                    {pred.prop_type} {pred.line_value}
-                                  </Text>
-                                  
-                                  {/* Game Context */}
-                                  {(pred.game_label || pred.game_time || pred.opponent_team) && (
-                                    <YStack marginTop="$2" space="$1">
-                                      {pred.game_label && (
-                                        <Text fontSize="$3" color="$color10">
-                                          {pred.game_label}
-                                          {pred.opponent_team && ` vs ${pred.opponent_team}`}
+                            return (
+                              <YStack 
+                                key={pred.id}
+                                flex={1}
+                                minWidth="25%"
+                                maxWidth="25%"
+                                space="$3"
+                              >
+                                <Card
+                                  padding="$4"
+                                  backgroundColor={isValueBet ? "$green2" : "$backgroundStrong"}
+                                  borderWidth={isValueBet ? 2 : 1}
+                                  borderColor={isValueBet ? "$green9" : "$borderColor"}
+                                  height="100%"
+                                >
+                                  <YStack space="$3">
+                                    {/* Header with Game Context */}
+                                    <XStack justifyContent="space-between" alignItems="flex-start" flexWrap="wrap">
+                                      <YStack flex={1} minWidth={200}>
+                                        <Text fontSize="$6" fontWeight="bold" color="$color">
+                                          {playerName}
+                                          {pred.team_abbreviation && ` (${pred.team_abbreviation})`}
                                         </Text>
+                                        <Text fontSize="$5" color="$color" textTransform="capitalize">
+                                          {pred.prop_type} {pred.line_value}
+                                        </Text>
+                                        
+                                        {/* Game Context */}
+                                        {(pred.game_label || pred.game_time || pred.opponent_team) && (
+                                          <YStack marginTop="$2" space="$1">
+                                            {pred.game_label && (
+                                              <Text fontSize="$3" color="$color10">
+                                                {pred.game_label}
+                                                {pred.opponent_team && ` vs ${pred.opponent_team}`}
+                                              </Text>
+                                            )}
+                                            {pred.game_time && formatGameTime(pred.game_time) && (
+                                              <Text fontSize="$3" color="$color10">
+                                                {formatGameTime(pred.game_time)}
+                                              </Text>
+                                            )}
+                                            {pred.game_status && (
+                                              <Text fontSize="$3" color="$color10" fontStyle="italic">
+                                                {pred.game_status}
+                                              </Text>
+                                            )}
+                                          </YStack>
+                                        )}
+                                      </YStack>
+                                      {isValueBet && (
+                                        <Card padding="$2" backgroundColor="$green9">
+                                          <Text fontSize="$5" fontWeight="bold" color="white">
+                                            VALUE BET
+                                          </Text>
+                                        </Card>
                                       )}
-                                      {pred.game_time && formatGameTime(pred.game_time) && (
+                                    </XStack>
+
+                                    <Separator />
+
+                                    {/* Prediction Details */}
+                                    <XStack space="$4" flexWrap="wrap">
+                                      <YStack minWidth={150} space="$2">
+                                        <Text fontSize="$4" color="$color11" fontWeight="600">
+                                          Prediction
+                                        </Text>
+                                        <Text color="$color">
+                                          {valueSide === 'over' ? 'OVER' : 'UNDER'}: {formatProbability(valueSide === 'over' ? pred.predicted_prob_over : pred.predicted_prob_under)}
+                                        </Text>
                                         <Text fontSize="$3" color="$color10">
-                                          {formatGameTime(pred.game_time)}
+                                          Confidence: {formatProbability(pred.confidence_score)}
                                         </Text>
-                                      )}
-                                      {pred.game_status && (
-                                        <Text fontSize="$3" color="$color10" fontStyle="italic">
-                                          {pred.game_status}
+                                      </YStack>
+
+                                      <YStack minWidth={150} space="$2">
+                                        <Text fontSize="$4" color="$color11" fontWeight="600">
+                                          Market Odds
                                         </Text>
+                                        {valueSide === 'over' ? (
+                                          <>
+                                            <Text color="$color">
+                                              OVER: {formatOdds(pred.best_over_odds)} ({formatProbability(pred.implied_prob_over)})
+                                            </Text>
+                                            {pred.over_vendor && (
+                                              <Text fontSize="$3" color="$color10">
+                                                {pred.over_vendor}
+                                              </Text>
+                                            )}
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Text color="$color">
+                                              UNDER: {formatOdds(pred.best_under_odds)} ({formatProbability(pred.implied_prob_under)})
+                                            </Text>
+                                            {pred.under_vendor && (
+                                              <Text fontSize="$3" color="$color10">
+                                                {pred.under_vendor}
+                                              </Text>
+                                            )}
+                                          </>
+                                        )}
+                                      </YStack>
+
+                                      <YStack minWidth={150} space="$2">
+                                        <Text fontSize="$4" color="$color11" fontWeight="600">
+                                          Value
+                                        </Text>
+                                        <Text 
+                                          fontSize="$5" 
+                                          fontWeight="bold"
+                                          color={bestValue >= 0 ? "$green9" : "$red9"}
+                                        >
+                                          {formatValue(bestValue)}
+                                        </Text>
+                                        <Text fontSize="$3" color="$color10">
+                                          {valueSide === 'over' 
+                                            ? formatValue(pred.predicted_value_over)
+                                            : formatValue(pred.predicted_value_under)
+                                          } edge
+                                        </Text>
+                                      </YStack>
+                                    </XStack>
+
+                                    {/* Player Stats Context */}
+                                    {(pred.player_avg_7 !== null || pred.player_season_avg !== null) && (
+                                      <>
+                                        <Separator />
+                                        <XStack space="$4" flexWrap="wrap">
+                                          {pred.player_avg_7 !== null && (
+                                            <Text fontSize="$3" color="$color10">
+                                              7-game avg: {formatNumber(pred.player_avg_7)}
+                                            </Text>
+                                          )}
+                                          {pred.player_season_avg !== null && (
+                                            <Text fontSize="$3" color="$color10">
+                                              Season avg: {formatNumber(pred.player_season_avg)}
+                                            </Text>
+                                          )}
+                                        </XStack>
+                                      </>
+                                    )}
+
+                                    {/* Actual Outcome (if available) */}
+                                    {pred.actual_result && (
+                                      <>
+                                        <Separator />
+                                        <XStack space="$3" alignItems="center">
+                                          <Text fontSize="$4" color="$color11" fontWeight="600">
+                                            Result:
+                                          </Text>
+                                          <Text 
+                                            fontSize="$5" 
+                                            fontWeight="bold"
+                                            color={pred.actual_result === valueSide ? "$green9" : "$red9"}
+                                            textTransform="uppercase"
+                                          >
+                                            {pred.actual_result} {pred.actual_value !== null && `(${pred.actual_value})`}
+                                          </Text>
+                                          {pred.actual_result === valueSide && (
+                                            <Text fontSize="$4" color="$green9">
+                                              ✓ Correct
+                                            </Text>
+                                          )}
+                                        </XStack>
+                                      </>
+                                    )}
+                                  </YStack>
+                                </Card>
+                              </YStack>
+                            );
+                          })}
+                        </XStack>
+                      ) : (
+                        // Mobile: Single column (unchanged)
+                        <YStack space="$3">
+                          {predictionsForType.map((pred) => {
+                            const bestValue = Math.max(
+                              pred.predicted_value_over || 0,
+                              pred.predicted_value_under || 0
+                            );
+                            const isValueBet = bestValue >= parseFloat(minValue);
+                            const valueSide = (pred.predicted_value_over || 0) > (pred.predicted_value_under || 0) ? 'over' : 'under';
+                            const playerName = `${pred.player_first_name} ${pred.player_last_name}`;
+
+                            return (
+                              <Card
+                                key={pred.id}
+                                padding="$4"
+                                backgroundColor={isValueBet ? "$green2" : "$backgroundStrong"}
+                                borderWidth={isValueBet ? 2 : 1}
+                                borderColor={isValueBet ? "$green9" : "$borderColor"}
+                              >
+                                <YStack space="$3">
+                                  {/* Header with Game Context */}
+                                  <XStack justifyContent="space-between" alignItems="flex-start" flexWrap="wrap">
+                                    <YStack flex={1} minWidth={200}>
+                                      <Text fontSize="$6" fontWeight="bold" color="$color">
+                                        {playerName}
+                                        {pred.team_abbreviation && ` (${pred.team_abbreviation})`}
+                                      </Text>
+                                      <Text fontSize="$5" color="$color" textTransform="capitalize">
+                                        {pred.prop_type} {pred.line_value}
+                                      </Text>
+                                      
+                                      {/* Game Context */}
+                                      {(pred.game_label || pred.game_time || pred.opponent_team) && (
+                                        <YStack marginTop="$2" space="$1">
+                                          {pred.game_label && (
+                                            <Text fontSize="$3" color="$color10">
+                                              {pred.game_label}
+                                              {pred.opponent_team && ` vs ${pred.opponent_team}`}
+                                            </Text>
+                                          )}
+                                          {pred.game_time && formatGameTime(pred.game_time) && (
+                                            <Text fontSize="$3" color="$color10">
+                                              {formatGameTime(pred.game_time)}
+                                            </Text>
+                                          )}
+                                          {pred.game_status && (
+                                            <Text fontSize="$3" color="$color10" fontStyle="italic">
+                                              {pred.game_status}
+                                            </Text>
+                                          )}
+                                        </YStack>
                                       )}
                                     </YStack>
-                                  )}
-                                </YStack>
-                                {isValueBet && (
-                                  <Card padding="$2" backgroundColor="$green9">
-                                    <Text fontSize="$5" fontWeight="bold" color="white">
-                                      VALUE BET
-                                    </Text>
-                                  </Card>
-                                )}
-                              </XStack>
-
-                              <Separator />
-
-                              {/* Prediction Details */}
-                              <XStack space="$4" flexWrap="wrap">
-                                <YStack minWidth={150} space="$2">
-                                  <Text fontSize="$4" color="$color11" fontWeight="600">
-                                    Prediction
-                                  </Text>
-                                  <Text color="$color">
-                                    {valueSide === 'over' ? 'OVER' : 'UNDER'}: {formatProbability(valueSide === 'over' ? pred.predicted_prob_over : pred.predicted_prob_under)}
-                                  </Text>
-                                  <Text fontSize="$3" color="$color10">
-                                    Confidence: {formatProbability(pred.confidence_score)}
-                                  </Text>
-                                </YStack>
-
-                                <YStack minWidth={150} space="$2">
-                                  <Text fontSize="$4" color="$color11" fontWeight="600">
-                                    Market Odds
-                                  </Text>
-                                  {valueSide === 'over' ? (
-                                    <>
-                                      <Text color="$color">
-                                        OVER: {formatOdds(pred.best_over_odds)} ({formatProbability(pred.implied_prob_over)})
-                                      </Text>
-                                      {pred.over_vendor && (
-                                        <Text fontSize="$3" color="$color10">
-                                          {pred.over_vendor}
+                                    {isValueBet && (
+                                      <Card padding="$2" backgroundColor="$green9">
+                                        <Text fontSize="$5" fontWeight="bold" color="white">
+                                          VALUE BET
                                         </Text>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Text color="$color">
-                                        UNDER: {formatOdds(pred.best_under_odds)} ({formatProbability(pred.implied_prob_under)})
-                                      </Text>
-                                      {pred.under_vendor && (
-                                        <Text fontSize="$3" color="$color10">
-                                          {pred.under_vendor}
-                                        </Text>
-                                      )}
-                                    </>
-                                  )}
-                                </YStack>
+                                      </Card>
+                                    )}
+                                  </XStack>
 
-                                <YStack minWidth={150} space="$2">
-                                  <Text fontSize="$4" color="$color11" fontWeight="600">
-                                    Value
-                                  </Text>
-                                  <Text 
-                                    fontSize="$5" 
-                                    fontWeight="bold"
-                                    color={bestValue >= 0 ? "$green9" : "$red9"}
-                                  >
-                                    {formatValue(bestValue)}
-                                  </Text>
-                                  <Text fontSize="$3" color="$color10">
-                                    {valueSide === 'over' 
-                                      ? formatValue(pred.predicted_value_over)
-                                      : formatValue(pred.predicted_value_under)
-                                    } edge
-                                  </Text>
-                                </YStack>
-                              </XStack>
-
-                              {/* Player Stats Context */}
-                              {(pred.player_avg_7 !== null || pred.player_season_avg !== null) && (
-                                <>
                                   <Separator />
+
+                                  {/* Prediction Details */}
                                   <XStack space="$4" flexWrap="wrap">
-                                    {pred.player_avg_7 !== null && (
-                                      <Text fontSize="$3" color="$color10">
-                                        7-game avg: {formatNumber(pred.player_avg_7)}
+                                    <YStack minWidth={150} space="$2">
+                                      <Text fontSize="$4" color="$color11" fontWeight="600">
+                                        Prediction
                                       </Text>
-                                    )}
-                                    {pred.player_season_avg !== null && (
-                                      <Text fontSize="$3" color="$color10">
-                                        Season avg: {formatNumber(pred.player_season_avg)}
+                                      <Text color="$color">
+                                        {valueSide === 'over' ? 'OVER' : 'UNDER'}: {formatProbability(valueSide === 'over' ? pred.predicted_prob_over : pred.predicted_prob_under)}
                                       </Text>
-                                    )}
-                                  </XStack>
-                                </>
-                              )}
+                                      <Text fontSize="$3" color="$color10">
+                                        Confidence: {formatProbability(pred.confidence_score)}
+                                      </Text>
+                                    </YStack>
 
-                              {/* Actual Outcome (if available) */}
-                              {pred.actual_result && (
-                                <>
-                                  <Separator />
-                                  <XStack space="$3" alignItems="center">
-                                    <Text fontSize="$4" color="$color11" fontWeight="600">
-                                      Result:
-                                    </Text>
-                                    <Text 
-                                      fontSize="$5" 
-                                      fontWeight="bold"
-                                      color={pred.actual_result === valueSide ? "$green9" : "$red9"}
-                                      textTransform="uppercase"
-                                    >
-                                      {pred.actual_result} {pred.actual_value !== null && `(${pred.actual_value})`}
-                                    </Text>
-                                    {pred.actual_result === valueSide && (
-                                      <Text fontSize="$4" color="$green9">
-                                        ✓ Correct
+                                    <YStack minWidth={150} space="$2">
+                                      <Text fontSize="$4" color="$color11" fontWeight="600">
+                                        Market Odds
                                       </Text>
-                                    )}
+                                      {valueSide === 'over' ? (
+                                        <>
+                                          <Text color="$color">
+                                            OVER: {formatOdds(pred.best_over_odds)} ({formatProbability(pred.implied_prob_over)})
+                                          </Text>
+                                          {pred.over_vendor && (
+                                            <Text fontSize="$3" color="$color10">
+                                              {pred.over_vendor}
+                                            </Text>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Text color="$color">
+                                            UNDER: {formatOdds(pred.best_under_odds)} ({formatProbability(pred.implied_prob_under)})
+                                          </Text>
+                                          {pred.under_vendor && (
+                                            <Text fontSize="$3" color="$color10">
+                                              {pred.under_vendor}
+                                            </Text>
+                                          )}
+                                        </>
+                                      )}
+                                    </YStack>
+
+                                    <YStack minWidth={150} space="$2">
+                                      <Text fontSize="$4" color="$color11" fontWeight="600">
+                                        Value
+                                      </Text>
+                                      <Text 
+                                        fontSize="$5" 
+                                        fontWeight="bold"
+                                        color={bestValue >= 0 ? "$green9" : "$red9"}
+                                      >
+                                        {formatValue(bestValue)}
+                                      </Text>
+                                      <Text fontSize="$3" color="$color10">
+                                        {valueSide === 'over' 
+                                          ? formatValue(pred.predicted_value_over)
+                                          : formatValue(pred.predicted_value_under)
+                                        } edge
+                                      </Text>
+                                    </YStack>
                                   </XStack>
-                                </>
-                              )}
-                            </YStack>
-                          </Card>
-                        );
-                      })}
-                    </YStack>
+
+                                  {/* Player Stats Context */}
+                                  {(pred.player_avg_7 !== null || pred.player_season_avg !== null) && (
+                                    <>
+                                      <Separator />
+                                      <XStack space="$4" flexWrap="wrap">
+                                        {pred.player_avg_7 !== null && (
+                                          <Text fontSize="$3" color="$color10">
+                                            7-game avg: {formatNumber(pred.player_avg_7)}
+                                          </Text>
+                                        )}
+                                        {pred.player_season_avg !== null && (
+                                          <Text fontSize="$3" color="$color10">
+                                            Season avg: {formatNumber(pred.player_season_avg)}
+                                          </Text>
+                                        )}
+                                      </XStack>
+                                    </>
+                                  )}
+
+                                  {/* Actual Outcome (if available) */}
+                                  {pred.actual_result && (
+                                    <>
+                                      <Separator />
+                                      <XStack space="$3" alignItems="center">
+                                        <Text fontSize="$4" color="$color11" fontWeight="600">
+                                          Result:
+                                        </Text>
+                                        <Text 
+                                          fontSize="$5" 
+                                          fontWeight="bold"
+                                          color={pred.actual_result === valueSide ? "$green9" : "$red9"}
+                                          textTransform="uppercase"
+                                        >
+                                          {pred.actual_result} {pred.actual_value !== null && `(${pred.actual_value})`}
+                                        </Text>
+                                        {pred.actual_result === valueSide && (
+                                          <Text fontSize="$4" color="$green9">
+                                            ✓ Correct
+                                          </Text>
+                                        )}
+                                      </XStack>
+                                    </>
+                                  )}
+                                </YStack>
+                              </Card>
+                            );
+                          })}
+                        </YStack>
+                      )
                     )}
                   </YStack>
                 );
