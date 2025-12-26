@@ -361,6 +361,69 @@ function isValueBet(
   return overIsValueBet || underIsValueBet;
 }
 
+/**
+ * Determine if a game status string represents a finished game.
+ * Finished games are those that have completed and are no longer in progress.
+ * 
+ * @param status - The game status string (e.g., "Final", "complete", "finished")
+ * @returns true if the game is finished, false otherwise
+ */
+function isFinishedGameStatus(status: string | null | undefined): boolean {
+  if (!status) return false;
+  
+  const normalized = status.trim().toLowerCase();
+  if (!normalized) return false;
+
+  // Keywords that indicate a game is finished
+  const finishedKeywords = [
+    'final',
+    'finished',
+    'complete',
+    'completed',
+    'full time',
+    'full-time',
+    'ft',
+    'ended',
+    'over',
+  ];
+
+  return finishedKeywords.some((keyword) =>
+    normalized.includes(keyword)
+  );
+}
+
+/**
+ * Determine if a prediction is for a finished game.
+ * Checks both the prediction's game_status field and the games list.
+ * 
+ * @param prediction - The prediction object
+ * @param gamesList - Array of Game objects from state
+ * @returns true if the prediction's game is finished, false otherwise
+ */
+function isPredictionForFinishedGame(
+  prediction: Prediction,
+  gamesList: Game[]
+): boolean {
+  // First, check if prediction has game_status field
+  if (prediction.game_status) {
+    if (isFinishedGameStatus(prediction.game_status)) {
+      return true;
+    }
+  }
+  
+  // Also check the games list for the associated game
+  const associatedGame = gamesList.find(g => g.id === prediction.game_id);
+  if (associatedGame) {
+    if (isFinishedGameStatus(associatedGame.status)) {
+      return true;
+    }
+  }
+  
+  // If we can't find the game and prediction doesn't have status, 
+  // assume it's not finished (conservative approach)
+  return false;
+}
+
 export default function PredictionsPage() {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -494,6 +557,13 @@ export default function PredictionsPage() {
         } else {
           console.warn('[Predictions] Response data exists but no predictions or valueBets found:', Object.keys(response.data));
         }
+        
+        // Filter out predictions for finished games
+        const initialCount = predictionsToSet.length;
+        predictionsToSet = predictionsToSet.filter((pred: Prediction) => 
+          !isPredictionForFinishedGame(pred, games)
+        );
+        console.log(`[Predictions] Filtered out finished games: ${initialCount} -> ${predictionsToSet.length} predictions`);
         
         // If a game is selected, filter predictions to only include players from that game's teams
         if (targetGameId && predictionsToSet.length > 0) {
