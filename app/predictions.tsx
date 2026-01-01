@@ -250,6 +250,32 @@ type SortOption = 'value-desc' | 'value-asc' | 'confidence-desc' | 'confidence-a
 // Prop type display order
 const PROP_TYPE_ORDER = ['points', 'assists', 'rebounds', 'steals', 'blocks', 'threes'];
 
+// Available books for filtering (should match admin.tsx)
+const AVAILABLE_BOOKS = [
+  'betmgm',
+  'bet365',
+  'ballybet',
+  'betparx',
+  'betrivers',
+  'caesars',
+  'draftkings',
+  'fanduel',
+  'rebet',
+];
+
+// Display names for books (human-readable)
+const BOOK_DISPLAY_NAMES: Record<string, string> = {
+  'betmgm': 'BetMGM',
+  'bet365': 'Bet365',
+  'ballybet': 'Bally Bet',
+  'betparx': 'BetParx',
+  'betrivers': 'BetRivers',
+  'caesars': 'Caesars',
+  'draftkings': 'DraftKings',
+  'fanduel': 'FanDuel',
+  'rebet': 'Rebet',
+};
+
 /**
  * Get display name for prop type
  */
@@ -372,6 +398,7 @@ export default function PredictionsPage() {
   const [showValueBetsOnly, setShowValueBetsOnly] = useState(false);
   const [sortOption, setSortOption] = useState<SortOption>('value-desc');
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [selectedBooks, setSelectedBooks] = useState<string[]>([]);
   const [games, setGames] = useState<Game[]>([]);
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null);
   const [gamesLoading, setGamesLoading] = useState(false);
@@ -561,9 +588,54 @@ export default function PredictionsPage() {
     fetchPredictions();
   }, [fetchUpcomingGames, fetchPredictions]);
 
+  // Toggle book selection
+  const toggleBook = useCallback((book: string) => {
+    setSelectedBooks((prev) => {
+      if (prev.includes(book)) {
+        return prev.filter((b) => b !== book);
+      } else {
+        return [...prev, book];
+      }
+    });
+  }, []);
+
+  // Filter predictions by selected books
+  const bookFilteredPredictions = useMemo(() => {
+    // If no books selected, return all predictions
+    if (selectedBooks.length === 0) {
+      return predictions;
+    }
+
+    // Normalize selected books to lowercase for comparison
+    const normalizedSelectedBooks = selectedBooks.map(book => book.toLowerCase());
+
+    // Filter predictions where BOTH over_vendor AND under_vendor match selected books
+    const filtered = predictions.filter(pred => {
+      // Both vendor fields must exist
+      if (!pred.over_vendor || !pred.under_vendor) {
+        return false; // Exclude predictions with missing vendor info
+      }
+
+      const overVendorNormalized = pred.over_vendor?.toLowerCase().trim();
+      const underVendorNormalized = pred.under_vendor?.toLowerCase().trim();
+
+      const overMatch = overVendorNormalized 
+        ? normalizedSelectedBooks.includes(overVendorNormalized)
+        : false;
+      const underMatch = underVendorNormalized
+        ? normalizedSelectedBooks.includes(underVendorNormalized)
+        : false;
+      
+      // BOTH over AND under must match selected books
+      return overMatch && underMatch;
+    });
+
+    return filtered;
+  }, [predictions, selectedBooks]);
+
   // Sort predictions based on selected option
   const sortedPredictions = useMemo(() => {
-    const sorted = [...predictions];
+    const sorted = [...bookFilteredPredictions];
 
     switch (sortOption) {
       case 'value-desc':
@@ -677,7 +749,7 @@ export default function PredictionsPage() {
       default:
         return sorted;
     }
-  }, [predictions, sortOption]);
+  }, [bookFilteredPredictions, sortOption]);
 
   // Group sorted predictions by prop type
   const groupedPredictions = useMemo(() => {
@@ -1312,6 +1384,89 @@ export default function PredictionsPage() {
                           </Pressable>
                         ))}
                       </YStack>
+                    </Card>
+                  )}
+                </YStack>
+
+                <YStack flex={1} minWidth={150} position="relative" zIndex={openDropdown === 'books' ? 100 : 1}>
+                  <Label htmlFor="books">Sportsbooks</Label>
+                  <Button
+                    data-dropdown
+                    width="100%"
+                    justifyContent="space-between"
+                    backgroundColor="$background"
+                    borderWidth={1}
+                    borderColor="$borderColor"
+                    onPress={() => setOpenDropdown(openDropdown === 'books' ? null : 'books')}
+                  >
+                    <Text color="$color">
+                      {selectedBooks.length === 0 
+                        ? 'All Books' 
+                        : selectedBooks.length === 1
+                          ? BOOK_DISPLAY_NAMES[selectedBooks[0]] || selectedBooks[0]
+                          : `${selectedBooks.length} Selected`}
+                    </Text>
+                    <Text color="$color">▼</Text>
+                  </Button>
+                  {openDropdown === 'books' && (
+                    <Card
+                      data-dropdown
+                      position="absolute"
+                      top="100%"
+                      left={0}
+                      right={0}
+                      marginTop="$1"
+                      padding="$2"
+                      backgroundColor="$backgroundStrong"
+                      borderWidth={1}
+                      borderColor="$borderColor"
+                      zIndex={100}
+                      elevation={4}
+                      maxHeight={300}
+                    >
+                      <ScrollView>
+                        <YStack space="$1">
+                          {/* "All Books" / "Clear All" option */}
+                          <Pressable
+                            onPress={() => {
+                              setSelectedBooks([]);
+                              setOpenDropdown(null);
+                            }}
+                          >
+                            <YStack
+                              padding="$2"
+                              backgroundColor={selectedBooks.length === 0 ? "$blue3" : "transparent"}
+                              borderRadius="$2"
+                              hoverStyle={{ backgroundColor: "$blue2" }}
+                            >
+                              <Text color="$color">All Books</Text>
+                            </YStack>
+                          </Pressable>
+                          <Separator />
+                          
+                          {/* Individual book options */}
+                          {AVAILABLE_BOOKS.map((book) => (
+                            <Pressable
+                              key={book}
+                              onPress={() => toggleBook(book)}
+                            >
+                              <YStack
+                                padding="$2"
+                                backgroundColor={selectedBooks.includes(book) ? "$blue3" : "transparent"}
+                                borderRadius="$2"
+                                hoverStyle={{ backgroundColor: "$blue2" }}
+                              >
+                                <XStack alignItems="center" space="$2">
+                                  <Text color="$color">
+                                    {selectedBooks.includes(book) ? '✓' : ' '}
+                                  </Text>
+                                  <Text color="$color">{BOOK_DISPLAY_NAMES[book] || book}</Text>
+                                </XStack>
+                              </YStack>
+                            </Pressable>
+                          ))}
+                        </YStack>
+                      </ScrollView>
                     </Card>
                   )}
                 </YStack>
