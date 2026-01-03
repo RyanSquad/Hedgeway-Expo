@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { get } from './api';
+import { tokenStorage } from './tokenStorage';
 
 export interface User {
   userId: string;
@@ -21,9 +22,25 @@ export function useAuth() {
     try {
       setLoading(true);
       setError(null);
+      
+      // Check if tokens exist before making API call
+      const isAuthenticated = await tokenStorage.isAuthenticated();
+      if (!isAuthenticated) {
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
       const response = await get<{ user: User }>('/api/auth/me');
       
       if (response.error) {
+        // If authentication error, clear tokens
+        if (response.error.includes('Authentication') || 
+            response.error.includes('JWT') || 
+            response.error.includes('401') ||
+            response.error.includes('Token')) {
+          await tokenStorage.clearTokens();
+        }
         setError(response.error);
         setUser(null);
       } else if (response.data?.user) {
