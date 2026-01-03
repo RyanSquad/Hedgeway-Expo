@@ -421,6 +421,7 @@ function isFinishedGameStatus(status: string | null | undefined): boolean {
 /**
  * Determine if a prediction is for a finished game.
  * Checks both the prediction's game_status field and the games list.
+ * Also checks if the game date is in the past (yesterday or earlier).
  * 
  * @param prediction - The prediction object
  * @param gamesList - Array of Game objects from state
@@ -443,10 +444,125 @@ function isPredictionForFinishedGame(
     if (isFinishedGameStatus(associatedGame.status)) {
       return true;
     }
+    
+    // Check if the game date is in the past (before today)
+    const gameDate = safeParseDate(associatedGame.date);
+    if (gameDate) {
+      const { today } = getTodayAndTomorrowDates();
+      const todayStart = new Date(today);
+      todayStart.setHours(0, 0, 0, 0);
+      
+      // If game date is before today, it's likely finished
+      if (gameDate.getTime() < todayStart.getTime()) {
+        return true;
+      }
+    }
+  }
+  
+  // Check if prediction has game_time that indicates it's from the past
+  if (prediction.game_time) {
+    const gameTimeDate = safeParseDate(prediction.game_time);
+    if (gameTimeDate) {
+      const { today } = getTodayAndTomorrowDates();
+      const todayStart = new Date(today);
+      todayStart.setHours(0, 0, 0, 0);
+      
+      // If game time is before today, it's likely finished
+      if (gameTimeDate.getTime() < todayStart.getTime()) {
+        return true;
+      }
+    }
+  }
+  
+  // If the prediction has actual_result, it's definitely finished
+  if (prediction.actual_result) {
+    return true;
+  }
+  
+  // Don't filter just because game is not in the list - that's too aggressive.
+  // Only filter if we have definitive evidence the game is finished/old:
+  // - game_status indicates finished
+  // - game date is before today
+  // - game_time is before today
+  // - actual_result exists
+  
+  // If we can't determine status, be conservative and keep the prediction
+  return false;
+}
+
+/**
+ * Determine if a game status string represents an in-progress/live game.
+ * In-progress games are those that have started but not yet finished.
+ * 
+ * @param status - The game status string (e.g., "1st Qtr", "Halftime", "Live")
+ * @returns true if the game is in progress, false otherwise
+ */
+function isInProgressGameStatus(status: string | null | undefined): boolean {
+  if (!status) return false;
+  
+  const normalized = status.trim().toLowerCase();
+  if (!normalized) return false;
+
+  // Keywords that indicate a game is in progress (live)
+  const inProgressKeywords = [
+    'qtr',
+    'quarter',
+    '1st',
+    '2nd',
+    '3rd',
+    '4th',
+    'ot',
+    'overtime',
+    'half',
+    'halftime',
+    'live',
+    'in progress',
+    'in-progress',
+    'inprogress',
+    'playing',
+    'active',
+  ];
+
+  // Check if status contains any in-progress keywords
+  const isInProgress = inProgressKeywords.some((keyword) =>
+    normalized.includes(keyword)
+  );
+
+  // Make sure it's not finished (finished games should be handled separately)
+  const isFinished = isFinishedGameStatus(status);
+  
+  return isInProgress && !isFinished;
+}
+
+/**
+ * Determine if a prediction is for an in-progress game.
+ * Checks both the prediction's game_status field and the games list.
+ * 
+ * @param prediction - The prediction object
+ * @param gamesList - Array of Game objects from state
+ * @returns true if the prediction's game is in progress, false otherwise
+ */
+function isPredictionForInProgressGame(
+  prediction: Prediction,
+  gamesList: Game[]
+): boolean {
+  // First, check if prediction has game_status field
+  if (prediction.game_status) {
+    if (isInProgressGameStatus(prediction.game_status)) {
+      return true;
+    }
+  }
+  
+  // Also check the games list for the associated game
+  const associatedGame = gamesList.find(g => g.id === prediction.game_id);
+  if (associatedGame) {
+    if (isInProgressGameStatus(associatedGame.status)) {
+      return true;
+    }
   }
   
   // If we can't find the game and prediction doesn't have status, 
-  // assume it's not finished (conservative approach)
+  // assume it's not in progress (conservative approach)
   return false;
 }
 
@@ -459,6 +575,7 @@ export default function PredictionsPage() {
   const [minValue, setMinValue] = useState<string>('0');
   const [minConfidence, setMinConfidence] = useState<string>('0');
   const [showValueBetsOnly, setShowValueBetsOnly] = useState(false);
+  const [hideInProgressGames, setHideInProgressGames] = useState(true); // Default: true (hidden)
   const [sortOption, setSortOption] = useState<SortOption>('value-desc');
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [selectedBooks, setSelectedBooks] = useState<string[]>([]);
@@ -479,19 +596,24 @@ export default function PredictionsPage() {
       setGamesError(null);
       setGamesLoading(true);
       
-      // Get today and tomorrow dates safely
+      // Get today, tomorrow, and yesterday dates safely
       const { today, tomorrow } = getTodayAndTomorrowDates();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
       
       const todayStr = today.toISOString().split('T')[0];
       const tomorrowStr = tomorrow.toISOString().split('T')[0];
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
       
-      // Fetch games for today and tomorrow
-      const [todayResponse, tomorrowResponse] = await Promise.all([
+      // Fetch games for yesterday, today, and tomorrow
+      // We fetch yesterday to check status of finished games for filtering predictions
+      const [yesterdayResponse, todayResponse, tomorrowResponse] = await Promise.all([
+        get<GamesResponse>(`/api/bdl/v1/games?dates[]=${yesterdayStr}&per_page=100`),
         get<GamesResponse>(`/api/bdl/v1/games?dates[]=${todayStr}&per_page=100`),
         get<GamesResponse>(`/api/bdl/v1/games?dates[]=${tomorrowStr}&per_page=100`)
       ]);
       
-      // Check for errors
+      // Check for errors (yesterday is optional, so we don't throw on error)
       if (todayResponse.error) {
         throw new Error(todayResponse.error);
       }
@@ -499,14 +621,21 @@ export default function PredictionsPage() {
         throw new Error(tomorrowResponse.error);
       }
       
-      // Combine and filter for upcoming games (status: "Scheduled" or not started)
+      // Combine all games (yesterday, today, tomorrow) for status checking
       const allGames: Game[] = [
+        ...(yesterdayResponse.data?.data || []),
         ...(todayResponse.data?.data || []),
         ...(tomorrowResponse.data?.data || [])
       ];
       
       // Filter for upcoming games (Scheduled status or status that indicates not started)
-      const upcomingGames = allGames.filter(game => {
+      // Only include today and tomorrow games in the upcoming games list
+      const todayAndTomorrowGames = [
+        ...(todayResponse.data?.data || []),
+        ...(tomorrowResponse.data?.data || [])
+      ];
+      
+      const upcomingGames = todayAndTomorrowGames.filter(game => {
         const status = game.status?.toLowerCase() || '';
         return status === 'scheduled' || 
                status === '' || 
@@ -532,7 +661,9 @@ export default function PredictionsPage() {
         return 0;
       });
       
-      setGames(upcomingGames);
+      // Store all games (including yesterday) for status checking in predictions filtering
+      // We need yesterday's games to check if predictions are for finished games
+      setGames(allGames);
     } catch (err: any) {
       console.error('Error fetching games:', err);
       setGamesError(err.message || 'Failed to fetch upcoming games');
@@ -550,12 +681,33 @@ export default function PredictionsPage() {
       // Use selectedGameId if provided, otherwise use gameId parameter
       const targetGameId = selectedGameId || gameId;
 
-      // Fetch predictions - when not showing value bets only, use game endpoint or all predictions
-      const endpoint = showValueBetsOnly 
-        ? `/api/predictions/value-bets?minValue=${minValue}&minConfidence=${minConfidence || '0'}${propTypeFilter !== 'all' ? `&propType=${propTypeFilter}` : ''}`
-        : targetGameId 
-          ? `/api/predictions/game/${targetGameId}${propTypeFilter !== 'all' ? `?propType=${propTypeFilter}` : ''}`
-          : `/api/predictions/value-bets?minValue=${minValue}&minConfidence=${minConfidence || '0'}${propTypeFilter !== 'all' ? `&propType=${propTypeFilter}` : ''}`;
+      // Build query parameters
+      const params = new URLSearchParams();
+      
+      // Value bet filters
+      if (showValueBetsOnly || !targetGameId) {
+        params.append('minValue', minValue);
+        params.append('minConfidence', minConfidence || '0');
+      }
+      
+      // Prop type filter
+      if (propTypeFilter !== 'all') {
+        params.append('propType', propTypeFilter);
+      }
+      
+      // Backend filtering parameters
+      // excludeFinished defaults to true on backend, but we'll be explicit
+      params.append('excludeFinished', 'true');
+      
+      // excludeInProgress based on frontend toggle
+      if (hideInProgressGames) {
+        params.append('excludeInProgress', 'true');
+      }
+
+      // Build endpoint
+      const endpoint = showValueBetsOnly || !targetGameId
+        ? `/api/predictions/value-bets?${params.toString()}`
+        : `/api/predictions/game/${targetGameId}?${params.toString()}`;
 
       console.log(`[Predictions] Fetching from endpoint: ${endpoint}`);
       const response = await get<PredictionsResponse>(endpoint);
@@ -585,12 +737,9 @@ export default function PredictionsPage() {
           console.warn('[Predictions] Response data exists but no predictions or valueBets found:', Object.keys(response.data));
         }
         
-        // Filter out predictions for finished games
-        const initialCount = predictionsToSet.length;
-        predictionsToSet = predictionsToSet.filter((pred: Prediction) => 
-          !isPredictionForFinishedGame(pred, games)
-        );
-        console.log(`[Predictions] Filtered out finished games: ${initialCount} -> ${predictionsToSet.length} predictions`);
+        // Backend handles all filtering for finished and in-progress games via query parameters
+        // No client-side filtering needed - backend returns only the predictions we want
+        console.log(`[Predictions] Received ${predictionsToSet.length} predictions from backend (already filtered)`);
         
         // If a game is selected, filter predictions to only include players from that game's teams
         if (targetGameId && predictionsToSet.length > 0) {
@@ -642,7 +791,7 @@ export default function PredictionsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [propTypeFilter, minValue, minConfidence, showValueBetsOnly, selectedGameId, games]);
+  }, [propTypeFilter, minValue, minConfidence, showValueBetsOnly, selectedGameId, games, hideInProgressGames]);
 
   useEffect(() => {
     fetchUpcomingGames();
@@ -1135,14 +1284,36 @@ export default function PredictionsPage() {
                 </Text>
               )}
               
-              {!gamesLoading && games.length > 0 && (
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ paddingVertical: 8 }}
-                >
-                  <XStack space="$2" flexWrap="wrap">
-                    {games.map((game) => {
+              {!gamesLoading && games.length > 0 && (() => {
+                // Filter to show only upcoming games (today and tomorrow) in the selector
+                // Yesterday's games are in the games list for status checking, but shouldn't be selectable
+                const { today, tomorrow } = getTodayAndTomorrowDates();
+                const todayStr = today.toISOString().split('T')[0];
+                const tomorrowStr = tomorrow.toISOString().split('T')[0];
+                
+                const upcomingGamesForSelector = games.filter(game => {
+                  const gameDate = safeParseDate(game.date);
+                  if (!gameDate) return false;
+                  const gameDateStr = gameDate.toISOString().split('T')[0];
+                  return gameDateStr === todayStr || gameDateStr === tomorrowStr;
+                });
+                
+                if (upcomingGamesForSelector.length === 0) {
+                  return (
+                    <Text fontSize="$3" color="$color10" textAlign="center">
+                      No upcoming games found.
+                    </Text>
+                  );
+                }
+                
+                return (
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingVertical: 8 }}
+                  >
+                    <XStack space="$2" flexWrap="wrap">
+                      {upcomingGamesForSelector.map((game) => {
                       const isSelected = selectedGameId === game.id;
                       const gameLabel = formatGameLabel(game);
                       let gameTime = formatGameTimeDisplay(game);
@@ -1261,10 +1432,11 @@ export default function PredictionsPage() {
                           </Card>
                         </Pressable>
                       );
-                    })}
-                  </XStack>
-                </ScrollView>
-              )}
+                      })}
+                    </XStack>
+                  </ScrollView>
+                );
+              })()}
               
               {selectedGameId && games.find(g => g.id === selectedGameId) && (
                 <Card padding="$2" backgroundColor="$blue2">
@@ -1547,6 +1719,14 @@ export default function PredictionsPage() {
                   color="white"
                 >
                   {showValueBetsOnly ? 'Show All' : 'Value Bets Only'}
+                </Button>
+
+                <Button
+                  onPress={() => setHideInProgressGames(!hideInProgressGames)}
+                  backgroundColor={hideInProgressGames ? "$blue9" : "$gray5"}
+                  color="white"
+                >
+                  {hideInProgressGames ? 'Show In-Progress' : 'Hide In-Progress'}
                 </Button>
               </XStack>
             </YStack>

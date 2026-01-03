@@ -7,7 +7,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "build": "expo export -p web"
+    "build": "expo export -p web",
+    "predictions": "node scripts/predictions-cli.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
