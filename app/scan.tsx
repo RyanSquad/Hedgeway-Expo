@@ -573,15 +573,10 @@ const ArbCard = memo(({
                   color="$colorPress" 
                   marginTop="$0.5"
                 >
-                  {displayTime}
+                  {displayTime}{arb.gameStatus ? ` ${arb.gameStatus}` : ''}
                 </Text>
               ) : null;
             })()}
-            {arb.gameStatus && (
-              <Text fontSize="$2" color="$colorPress">
-                {arb.gameStatus}
-              </Text>
-            )}
           </YStack>
           <YStack alignItems="flex-end">
             <Text fontSize="$5" fontWeight="bold" color="$green10">

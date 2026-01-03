@@ -13,7 +13,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { YStack, XStack, Text, ScrollView, Spinner, Card, Separator, Label, Button } from 'tamagui';
 import { StatusBar } from 'expo-status-bar';
-import { RefreshControl, Platform, Pressable } from 'react-native';
+import { RefreshControl, Platform, Pressable, View } from 'react-native';
 import { get } from '../lib/api';
 import { NavigationBar } from '../components/NavigationBar';
 
@@ -1811,11 +1811,14 @@ export default function PredictionsPage() {
                     {!isCollapsed && (
                       Platform.OS === 'web' ? (
                         // Web: 3-column grid layout
-                        <XStack 
-                          flexWrap="wrap" 
-                          space="$2"
-                          gap="$2"
-                          alignItems="stretch"
+                        <View
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(3, 1fr)',
+                            gap: 12, // $2 spacing = 12px
+                            width: '100%',
+                            alignItems: 'stretch',
+                          }}
                         >
                           {predictionsForType.map((pred) => {
                             const bestValue = Math.max(
@@ -1827,19 +1830,14 @@ export default function PredictionsPage() {
                             const playerName = `${pred.player_first_name} ${pred.player_last_name}`;
 
                             return (
-                              <YStack 
+                              <Card
                                 key={pred.id}
-                                flex={1}
-                                minWidth="30%"
-                                space="$3"
+                                padding="$4"
+                                backgroundColor={isValueBet ? "$green2" : "$backgroundStrong"}
+                                borderWidth={isValueBet ? 2 : 1}
+                                borderColor={isValueBet ? "$green9" : "$borderColor"}
+                                style={{ height: '100%' }}
                               >
-                                <Card
-                                  padding="$4"
-                                  backgroundColor={isValueBet ? "$green2" : "$backgroundStrong"}
-                                  borderWidth={isValueBet ? 2 : 1}
-                                  borderColor={isValueBet ? "$green9" : "$borderColor"}
-                                  height="100%"
-                                >
                                   <YStack space="$3">
                                     {/* Header with Game Context */}
                                     <XStack justifyContent="space-between" alignItems="flex-start" flexWrap="wrap">
@@ -2004,10 +2002,9 @@ export default function PredictionsPage() {
                                     )}
                                   </YStack>
                                 </Card>
-                              </YStack>
                             );
                           })}
-                        </XStack>
+                        </View>
                       ) : (
                         // Mobile: Single column (unchanged)
                         <YStack space="$3">
